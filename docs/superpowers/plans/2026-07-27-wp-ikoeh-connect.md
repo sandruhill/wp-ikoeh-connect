@@ -328,14 +328,12 @@ if (!defined('ABSPATH')) {
 class Ikoeh_Connect_Admin {
 
     public static function register_menu() {
-        add_menu_page(
+        add_options_page(
             'WP iKOEH Connect',
             'iKOEH Connect',
             'manage_options',
             'ikoeh-connect',
-            [__CLASS__, 'render_page'],
-            'dashicons-admin-plugins',
-            80
+            [__CLASS__, 'render_page']
         );
     }
 
@@ -368,18 +366,25 @@ class Ikoeh_Connect_Admin {
                 </div>
             <?php endif; ?>
 
-            <table class="form-table" role="presentation">
-                <tr>
-                    <th scope="row">Status da conexão</th>
-                    <td>
-                        <?php if ($has_token) : ?>
-                            <span style="color:#00a32a;">&#9679;</span> Token configurado
-                        <?php else : ?>
-                            <span style="color:#d63638;">&#9679;</span> Nenhum token configurado
-                        <?php endif; ?>
-                    </td>
-                </tr>
-            </table>
+            <div style="
+                background: <?php echo $has_token ? '#edfaef' : '#fcf0f1'; ?>;
+                border-left: 4px solid <?php echo $has_token ? '#00a32a' : '#d63638'; ?>;
+                padding: 1px 12px;
+                margin: 16px 0;
+            ">
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">Status da conexão</th>
+                        <td>
+                            <?php if ($has_token) : ?>
+                                <span style="color:#00a32a;">&#9679;</span> Token configurado
+                            <?php else : ?>
+                                <span style="color:#d63638;">&#9679;</span> Nenhum token configurado
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                </table>
+            </div>
 
             <form method="post">
                 <?php wp_nonce_field('ikoeh_connect_regenerate_action', 'ikoeh_connect_nonce'); ?>
