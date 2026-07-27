@@ -35,11 +35,34 @@ add_action('admin_menu', ['Ikoeh_Connect_Admin', 'register_menu']);
 add_action('init', ['Ikoeh_Connect_Admin', 'register_ajax']);
 
 add_action('rest_api_init', function () {
-    Ikoeh_Connect_Setup::register_routes();
-    Ikoeh_Connect_Rest_Site_Info::register_routes();
-    Ikoeh_Connect_Rest_Plugins::register_routes();
-    Ikoeh_Connect_Rest_Content::register_routes();
-    Ikoeh_Connect_Rest_Db::register_routes();
-    Ikoeh_Connect_Rest_Logs::register_routes();
-    Ikoeh_Connect_Rest_Cache::register_routes();
+    // TEMPORARY DIAGNOSTIC: catches and records any error thrown while
+    // registering routes, so it can be inspected via /site-info without
+    // needing server log access. Remove once the root cause is found.
+    $registrars = [
+        'Setup'      => ['Ikoeh_Connect_Setup', 'register_routes'],
+        'Site_Info'  => ['Ikoeh_Connect_Rest_Site_Info', 'register_routes'],
+        'Plugins'    => ['Ikoeh_Connect_Rest_Plugins', 'register_routes'],
+        'Content'    => ['Ikoeh_Connect_Rest_Content', 'register_routes'],
+        'Db'         => ['Ikoeh_Connect_Rest_Db', 'register_routes'],
+        'Logs'       => ['Ikoeh_Connect_Rest_Logs', 'register_routes'],
+        'Cache'      => ['Ikoeh_Connect_Rest_Cache', 'register_routes'],
+    ];
+
+    $errors = [];
+    $succeeded = [];
+
+    foreach ($registrars as $label => $callable) {
+        try {
+            call_user_func($callable);
+            $succeeded[] = $label;
+        } catch (\Throwable $e) {
+            $errors[] = $label . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine();
+        }
+    }
+
+    update_option('ikoeh_connect_diagnostic', [
+        'succeeded' => $succeeded,
+        'errors'    => $errors,
+        'at'        => time(),
+    ], false);
 });

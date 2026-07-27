@@ -22,6 +22,8 @@ class Ikoeh_Connect_Rest_Site_Info {
             'active_theme'          => get_stylesheet(),
             'active_plugins'        => get_option('active_plugins', []),
             'ikoeh_connect_version' => IKOEH_CONNECT_VERSION,
+            // TEMPORARY DIAGNOSTIC: remove once the route-registration issue is found.
+            'ikoeh_connect_diagnostic' => get_option('ikoeh_connect_diagnostic', null),
         ], 200);
     }
 }
