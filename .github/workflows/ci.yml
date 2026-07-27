@@ -82,9 +82,20 @@ jobs:
         run: |
           token=$(curl -sS -X POST http://localhost:8080/wp-json/ikoeh-connect/v1/setup \
             -H "X-Setup-Key: local-dev-not-a-real-secret" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+          echo "TOKEN=$token" >> "$GITHUB_ENV"
           code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info \
             -H "Authorization: Bearer $token")
           test "$code" = "200"
+      - name: Verify the Setup connection has all scopes (plugins list succeeds)
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/plugins \
+            -H "Authorization: Bearer $TOKEN")
+          test "$code" = "200"
+      - name: Verify an invalid token is rejected with 401 on a scoped endpoint
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/plugins \
+            -H "Authorization: Bearer not-a-real-token")
+          test "$code" = "401"
       - name: Tear down
         if: always()
         run: docker compose down -v
