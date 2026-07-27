@@ -1782,7 +1782,12 @@ Expected: both `db` and `wordpress` containers report `Started`
 Run: `for i in $(seq 1 30); do code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-login.php); [ "$code" != "000" ] && echo "up: $code" && break; sleep 2; done`
 Expected: prints `up: 200` (or a redirect code) within the 30 tries
 
-- [ ] **Step 4: Install WordPress core non-interactively**
+- [ ] **Step 4: Wait for MySQL to accept connections**
+
+Run: `for i in $(seq 1 30); do docker compose exec -T db mysqladmin ping -uwordpress -pwordpress --silent && break; sleep 2; done`
+Expected: loop exits once MySQL responds to ping, well before the 30-try limit. The `wordpress` container responding to HTTP (Step 3) does not guarantee MySQL has finished initializing on first boot, this is a separate wait.
+
+- [ ] **Step 5: Install WordPress core non-interactively**
 
 ```bash
 docker compose run --rm wp-cli wp core install \
@@ -1796,12 +1801,12 @@ docker compose run --rm wp-cli wp core install \
 
 Expected: `Success: WordPress installed successfully.`
 
-- [ ] **Step 5: Verify the plugin loaded and rejects unauthenticated requests**
+- [ ] **Step 6: Verify the plugin loaded and rejects unauthenticated requests**
 
 Run: `curl -sS -o /dev/null -w "%{http_code}\n" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info`
 Expected: `401`
 
-- [ ] **Step 6: Verify the full setup and authenticated call work locally**
+- [ ] **Step 7: Verify the full setup and authenticated call work locally**
 
 ```bash
 TOKEN=$(curl -sS -X POST http://localhost:8080/wp-json/ikoeh-connect/v1/setup \
@@ -1811,12 +1816,12 @@ curl -sS http://localhost:8080/wp-json/ikoeh-connect/v1/site-info -H "Authorizat
 
 Expected: JSON with `wp_version`, `php_version`, `active_theme`, `active_plugins`.
 
-- [ ] **Step 7: Tear down**
+- [ ] **Step 8: Tear down**
 
 Run: `docker compose down -v`
 Expected: containers and volumes removed, exits 0
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add docker-compose.yml
@@ -1884,15 +1889,31 @@ jobs:
           done
           echo "WordPress did not come up in time"
           exit 1
+      - name: Wait for MySQL to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose exec -T db mysqladmin ping -uwordpress -pwordpress --silent; then
+              echo "MySQL is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL did not become ready in time"
+          exit 1
       - name: Install WordPress core
         run: |
-          docker compose run --rm wp-cli wp core install \
-            --url=http://localhost:8080 \
-            --title="iKOEH Connect CI" \
-            --admin_user=admin \
-            --admin_password=admin \
-            --admin_email=ci@example.com \
-            --path=/var/www/html
+          for i in $(seq 1 5); do
+            docker compose run --rm wp-cli wp core install \
+              --url=http://localhost:8080 \
+              --title="iKOEH Connect CI" \
+              --admin_user=admin \
+              --admin_password=admin \
+              --admin_email=ci@example.com \
+              --path=/var/www/html && exit 0
+            echo "Retrying wp core install..."
+            sleep 3
+          done
+          exit 1
       - name: Verify REST API rejects unauthenticated requests
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info)
