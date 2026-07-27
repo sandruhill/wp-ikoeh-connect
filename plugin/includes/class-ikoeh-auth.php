@@ -24,7 +24,13 @@ class Ikoeh_Connect_Auth {
     }
 
     public static function verify_request(WP_REST_Request $request) {
-        if (!is_ssl()) {
+        // IKOEH_CONNECT_SKIP_HTTPS_CHECK exists only for the isolated local/CI
+        // Docker environment (docker-compose.yml), which deliberately runs
+        // plain HTTP with no TLS termination. It is never defined on a real
+        // deployment, so HTTPS stays mandatory everywhere else.
+        $skip_https_check = defined('IKOEH_CONNECT_SKIP_HTTPS_CHECK') && IKOEH_CONNECT_SKIP_HTTPS_CHECK;
+
+        if (!is_ssl() && !$skip_https_check) {
             return new WP_Error('ikoeh_connect_https_required', 'HTTPS required.', ['status' => 400]);
         }
 
