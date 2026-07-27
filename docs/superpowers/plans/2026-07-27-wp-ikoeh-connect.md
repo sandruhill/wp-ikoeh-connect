@@ -1768,6 +1768,9 @@ services:
       WORDPRESS_DB_USER: wordpress
       WORDPRESS_DB_PASSWORD: wordpress
       WORDPRESS_DB_NAME: wordpress
+      # Must match the `wordpress` service exactly: whichever container boots
+      # first generates wp-config.php, and it is not regenerated afterward.
+      WORDPRESS_CONFIG_EXTRA: "define('IKOEH_CONNECT_SETUP_KEY', 'local-dev-not-a-real-secret'); define('IKOEH_CONNECT_SKIP_HTTPS_CHECK', true);"
     volumes:
       - wp_data:/var/www/html
 
@@ -1807,12 +1810,21 @@ docker compose run --rm wp-cli wp core install \
 
 Expected: `Success: WordPress installed successfully.`
 
-- [ ] **Step 6: Verify the plugin loaded and rejects unauthenticated requests**
+- [ ] **Step 6: Set pretty permalinks and flush rewrite rules**
+
+```bash
+docker compose run --rm wp-cli wp rewrite structure '/%postname%/' --path=/var/www/html
+docker compose run --rm wp-cli wp rewrite flush --path=/var/www/html
+```
+
+Expected: both commands exit 0. Without this, WordPress serves `/wp-json/...` requests with a 301 redirect to a trailing-slash URL instead of resolving them directly, which breaks plain `curl` checks that do not follow redirects.
+
+- [ ] **Step 7: Verify the plugin loaded and rejects unauthenticated requests**
 
 Run: `curl -sS -o /dev/null -w "%{http_code}\n" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info`
 Expected: `401`
 
-- [ ] **Step 7: Verify the full setup and authenticated call work locally**
+- [ ] **Step 8: Verify the full setup and authenticated call work locally**
 
 ```bash
 TOKEN=$(curl -sS -X POST http://localhost:8080/wp-json/ikoeh-connect/v1/setup \
@@ -1822,12 +1834,12 @@ curl -sS http://localhost:8080/wp-json/ikoeh-connect/v1/site-info -H "Authorizat
 
 Expected: JSON with `wp_version`, `php_version`, `active_theme`, `active_plugins`.
 
-- [ ] **Step 8: Tear down**
+- [ ] **Step 9: Tear down**
 
 Run: `docker compose down -v`
 Expected: containers and volumes removed, exits 0
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add docker-compose.yml
@@ -1920,6 +1932,10 @@ jobs:
             sleep 3
           done
           exit 1
+      - name: Set pretty permalinks and flush rewrite rules
+        run: |
+          docker compose run --rm wp-cli wp rewrite structure '/%postname%/' --path=/var/www/html
+          docker compose run --rm wp-cli wp rewrite flush --path=/var/www/html
       - name: Verify REST API rejects unauthenticated requests
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info)

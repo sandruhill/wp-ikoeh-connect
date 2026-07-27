@@ -70,22 +70,19 @@ jobs:
             sleep 3
           done
           exit 1
-      - name: Debug REST API response
+      - name: Set pretty permalinks and flush rewrite rules
         run: |
-          curl -sS -i http://localhost:8080/wp-json/ikoeh-connect/v1/site-info
-          echo "---wp-config.php IKOEH lines---"
-          docker compose exec -T wordpress grep -i IKOEH_CONNECT /var/www/html/wp-config.php || true
-          echo "---mu-plugins listing---"
-          docker compose exec -T wordpress ls -la /var/www/html/wp-content/mu-plugins/
+          docker compose run --rm wp-cli wp rewrite structure '/%postname%/' --path=/var/www/html
+          docker compose run --rm wp-cli wp rewrite flush --path=/var/www/html
       - name: Verify REST API rejects unauthenticated requests
         run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info)
+          code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info)
           test "$code" = "401"
       - name: Claim setup token and verify authenticated site-info
         run: |
-          token=$(curl -s -X POST http://localhost:8080/wp-json/ikoeh-connect/v1/setup \
+          token=$(curl -sS -X POST http://localhost:8080/wp-json/ikoeh-connect/v1/setup \
             -H "X-Setup-Key: local-dev-not-a-real-secret" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
-          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info \
+          code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info \
             -H "Authorization: Bearer $token")
           test "$code" = "200"
       - name: Tear down

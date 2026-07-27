@@ -36,6 +36,9 @@ services:
       WORDPRESS_DB_USER: wordpress
       WORDPRESS_DB_PASSWORD: wordpress
       WORDPRESS_DB_NAME: wordpress
+      # Must match the `wordpress` service exactly: whichever container boots
+      # first generates wp-config.php, and it is not regenerated afterward.
+      WORDPRESS_CONFIG_EXTRA: "define('IKOEH_CONNECT_SETUP_KEY', 'local-dev-not-a-real-secret'); define('IKOEH_CONNECT_SKIP_HTTPS_CHECK', true);"
     volumes:
       - wp_data:/var/www/html
 
