@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  php-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint all plugin PHP files
+        run: find plugin -name "*.php" -print -exec php -l {} \;
+
+  mcp-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        working-directory: mcp-server
+        run: npm ci
+      - name: Syntax-check all source files
+        working-directory: mcp-server
+        run: find src -name "*.js" -print -exec node --check {} \;
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [php-lint, mcp-server]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start isolated WordPress environment
+        run: docker compose up -d
+      - name: Wait for WordPress to respond
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-login.php || true)
+            if [ "$code" != "000" ]; then
+              echo "WordPress is up (HTTP $code)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "WordPress did not come up in time"
+          exit 1
+      - name: Install WordPress core
+        run: |
+          docker compose run --rm wp-cli wp core install \
+            --url=http://localhost:8080 \
+            --title="iKOEH Connect CI" \
+            --admin_user=admin \
+            --admin_password=admin \
+            --admin_email=ci@example.com \
+            --path=/var/www/html
+      - name: Verify REST API rejects unauthenticated requests
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info)
+          test "$code" = "401"
+      - name: Claim setup token and verify authenticated site-info
+        run: |
+          token=$(curl -s -X POST http://localhost:8080/wp-json/ikoeh-connect/v1/setup \
+            -H "X-Setup-Key: local-dev-not-a-real-secret" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info \
+            -H "Authorization: Bearer $token")
+          test "$code" = "200"
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
