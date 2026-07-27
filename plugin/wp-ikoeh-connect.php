@@ -29,6 +29,8 @@ require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-db.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-logs.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-cache.php';
 
+add_action('init', ['Ikoeh_Connect_Auth', 'maybe_migrate']);
+
 add_action('admin_menu', ['Ikoeh_Connect_Admin', 'register_menu']);
 
 add_action('rest_api_init', function () {
