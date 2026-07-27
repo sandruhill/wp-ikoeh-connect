@@ -22,9 +22,13 @@ define('IKOEH_CONNECT_REST_NAMESPACE', 'ikoeh-connect/v1');
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-auth.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-setup.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-admin.php';
+require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-site-info.php';
+require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-plugins.php';
 
 add_action('admin_menu', ['Ikoeh_Connect_Admin', 'register_menu']);
 
 add_action('rest_api_init', function () {
     Ikoeh_Connect_Setup::register_routes();
+    Ikoeh_Connect_Rest_Site_Info::register_routes();
+    Ikoeh_Connect_Rest_Plugins::register_routes();
 });
