@@ -70,6 +70,13 @@ jobs:
             sleep 3
           done
           exit 1
+      - name: Debug REST API response
+        run: |
+          curl -sS -i http://localhost:8080/wp-json/ikoeh-connect/v1/site-info
+          echo "---wp-config.php IKOEH lines---"
+          docker compose exec -T wordpress grep -i IKOEH_CONNECT /var/www/html/wp-config.php || true
+          echo "---mu-plugins listing---"
+          docker compose exec -T wordpress ls -la /var/www/html/wp-content/mu-plugins/
       - name: Verify REST API rejects unauthenticated requests
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info)
