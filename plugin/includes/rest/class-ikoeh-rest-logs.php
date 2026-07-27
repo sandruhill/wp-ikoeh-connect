@@ -11,7 +11,7 @@ class Ikoeh_Connect_Rest_Logs {
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/logs/debug', [
             'methods'             => 'GET',
             'callback'            => [__CLASS__, 'handle'],
-            'permission_callback' => ['Ikoeh_Connect_Auth', 'verify_request'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('logs_cache'),
         ]);
     }
 

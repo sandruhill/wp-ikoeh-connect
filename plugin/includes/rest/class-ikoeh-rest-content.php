@@ -9,13 +9,13 @@ class Ikoeh_Connect_Rest_Content {
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/content/(?P<id>\d+)', [
             'methods'             => 'GET',
             'callback'            => [__CLASS__, 'get_content'],
-            'permission_callback' => ['Ikoeh_Connect_Auth', 'verify_request'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('content'),
         ]);
 
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/content/(?P<id>\d+)', [
             'methods'             => 'PUT',
             'callback'            => [__CLASS__, 'update_content'],
-            'permission_callback' => ['Ikoeh_Connect_Auth', 'verify_request'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('content'),
         ]);
     }
 

@@ -9,31 +9,31 @@ class Ikoeh_Connect_Rest_Plugins {
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/plugins', [
             'methods'             => 'GET',
             'callback'            => [__CLASS__, 'list_plugins'],
-            'permission_callback' => ['Ikoeh_Connect_Auth', 'verify_request'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
         ]);
 
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/plugins/install', [
             'methods'             => 'POST',
             'callback'            => [__CLASS__, 'install_plugin'],
-            'permission_callback' => ['Ikoeh_Connect_Auth', 'verify_request'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
         ]);
 
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/plugins/(?P<slug>[^/]+)/activate', [
             'methods'             => 'POST',
             'callback'            => [__CLASS__, 'activate_plugin'],
-            'permission_callback' => ['Ikoeh_Connect_Auth', 'verify_request'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
         ]);
 
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/plugins/(?P<slug>[^/]+)/deactivate', [
             'methods'             => 'POST',
             'callback'            => [__CLASS__, 'deactivate_plugin'],
-            'permission_callback' => ['Ikoeh_Connect_Auth', 'verify_request'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
         ]);
 
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/plugins/(?P<slug>[^/]+)', [
             'methods'             => 'DELETE',
             'callback'            => [__CLASS__, 'delete_plugin'],
-            'permission_callback' => ['Ikoeh_Connect_Auth', 'verify_request'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
         ]);
     }
 

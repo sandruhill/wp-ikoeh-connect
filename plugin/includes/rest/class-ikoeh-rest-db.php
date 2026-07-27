@@ -12,7 +12,7 @@ class Ikoeh_Connect_Rest_Db {
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/db/query', [
             'methods'             => 'POST',
             'callback'            => [__CLASS__, 'handle'],
-            'permission_callback' => ['Ikoeh_Connect_Auth', 'verify_request'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('db'),
         ]);
     }
 
