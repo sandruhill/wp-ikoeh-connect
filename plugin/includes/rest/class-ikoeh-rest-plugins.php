@@ -146,6 +146,15 @@ class Ikoeh_Connect_Rest_Plugins {
         rename($source, $destination);
         self::rrmdir($tmp_dir);
 
+        // On shared hosting, PHP's opcache can keep serving compiled bytecode
+        // for the old files after they've been replaced on disk, especially
+        // when opcache.validate_timestamps is off. Force a reset so an
+        // in-place update (like this one) takes effect immediately instead
+        // of only after opcache's own revalidation window elapses.
+        if (function_exists('opcache_reset')) {
+            opcache_reset();
+        }
+
         return new WP_REST_Response(['installed' => $entry_name, 'target' => $is_mu ? 'mu-plugins' : 'plugins'], 200);
     }
 
