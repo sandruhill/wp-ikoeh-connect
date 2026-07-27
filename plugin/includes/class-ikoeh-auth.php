@@ -6,6 +6,7 @@ if (!defined('ABSPATH')) {
 class Ikoeh_Connect_Auth {
 
     const TOKEN_HASH_OPTION = 'ikoeh_connect_token_hash';
+    const LAST_USED_OPTION = 'ikoeh_connect_last_used_at';
 
     public static function generate_token() {
         return bin2hex(random_bytes(32));
@@ -46,7 +47,16 @@ class Ikoeh_Connect_Auth {
             return new WP_Error('ikoeh_connect_unauthorized', 'Invalid token.', ['status' => 401]);
         }
 
+        // Records real usage, not just that a token exists, so the admin
+        // screen can show "last activity" instead of only "token configured".
+        update_option(self::LAST_USED_OPTION, time(), false);
+
         return true;
+    }
+
+    public static function last_used_at() {
+        $value = get_option(self::LAST_USED_OPTION, 0);
+        return $value ? (int) $value : null;
     }
 
     public static function setup_rate_limit_ok() {
