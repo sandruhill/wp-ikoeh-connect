@@ -18,3 +18,5 @@ define('IKOEH_CONNECT_VERSION', '0.1.0');
 define('IKOEH_CONNECT_DIR', plugin_dir_path(__FILE__));
 define('IKOEH_CONNECT_URL', plugin_dir_url(__FILE__));
 define('IKOEH_CONNECT_REST_NAMESPACE', 'ikoeh-connect/v1');
+
+require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-auth.php';
