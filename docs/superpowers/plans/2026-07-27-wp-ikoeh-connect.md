@@ -1759,7 +1759,6 @@ services:
       - db
     volumes:
       - wp_data:/var/www/html
-    entrypoint: ["tail", "-f", "/dev/null"]
 
 volumes:
   db_data:
