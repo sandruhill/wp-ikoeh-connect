@@ -34,8 +34,7 @@ class Ikoeh_Connect_Setup {
             return new WP_Error('ikoeh_connect_invalid_setup_key', 'Invalid setup key.', ['status' => 401]);
         }
 
-        $token = Ikoeh_Connect_Auth::generate_token();
-        Ikoeh_Connect_Auth::store_token($token);
+        $token = Ikoeh_Connect_Auth::create_connection('Setup', Ikoeh_Connect_Auth::ALL_SCOPES);
         update_option(self::CLAIMED_OPTION, true, false);
 
         return new WP_REST_Response(['token' => $token], 200);
