@@ -137,13 +137,32 @@ class Ikoeh_Connect_Rest_Plugins {
             return new WP_Error('ikoeh_connect_invalid_zip', 'Zip contents failed validation.', ['status' => 400]);
         }
 
+        // Atomic-as-possible swap: renaming the old destination out of the
+        // way and the new source into place are both single, fast directory
+        // renames on the same filesystem. Deleting the old destination in
+        // place first (rrmdir, which walks and unlinks every file) used to
+        // leave the plugin missing from disk for however long that walk
+        // took; any request landing in that window (including WordPress's
+        // own admin-ajax/heartbeat traffic) found the active plugin's main
+        // file gone and triggered WordPress's fatal-error protection, which
+        // auto-deactivates the plugin. The backup-then-swap below shrinks
+        // that window from "time to delete N files" to "time between two
+        // rename() syscalls".
+        $backup = null;
+
         if (is_dir($destination)) {
-            self::rrmdir($destination);
+            $backup = trailingslashit(dirname($destination)) . '.' . $entry_name . '-backup-' . wp_generate_password(6, false);
+            rename($destination, $backup);
         } elseif (file_exists($destination)) {
             unlink($destination);
         }
 
         rename($source, $destination);
+
+        if ($backup) {
+            self::rrmdir($backup);
+        }
+
         self::rrmdir($tmp_dir);
 
         // On shared hosting, PHP's opcache can keep serving compiled bytecode
