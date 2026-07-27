@@ -20,3 +20,8 @@ define('IKOEH_CONNECT_URL', plugin_dir_url(__FILE__));
 define('IKOEH_CONNECT_REST_NAMESPACE', 'ikoeh-connect/v1');
 
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-auth.php';
+require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-setup.php';
+
+add_action('rest_api_init', function () {
+    Ikoeh_Connect_Setup::register_routes();
+});
