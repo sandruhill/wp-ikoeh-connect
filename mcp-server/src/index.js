@@ -13,6 +13,7 @@ import { registerCacheTools } from "./tools/cache.js";
 import { registerElementorTools } from "./tools/elementor.js";
 import { registerThemeTools } from "./tools/theme.js";
 import { registerMediaTools } from "./tools/media.js";
+import { registerPostsTools } from "./tools/posts.js";
 
 const siteName = process.argv[2];
 
@@ -36,6 +37,7 @@ registerCacheTools(server, client);
 registerElementorTools(server, client);
 registerThemeTools(server, client);
 registerMediaTools(server, client);
+registerPostsTools(server, client);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
