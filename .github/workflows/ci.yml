@@ -74,6 +74,8 @@ jobs:
         run: |
           docker compose run --rm wp-cli wp rewrite structure '/%postname%/' --path=/var/www/html
           docker compose run --rm wp-cli wp rewrite flush --path=/var/www/html
+      - name: Install and activate Elementor
+        run: docker compose run --rm wp-cli wp plugin install elementor --activate --path=/var/www/html
       - name: Verify REST API rejects unauthenticated requests
         run: |
           code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info)
@@ -85,6 +87,16 @@ jobs:
           echo "TOKEN=$token" >> "$GITHUB_ENV"
           code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info \
             -H "Authorization: Bearer $token")
+          test "$code" = "200"
+      - name: Verify Elementor widgets endpoint returns data
+        run: |
+          count=$(curl -sS http://localhost:8080/wp-json/ikoeh-connect/v1/elementor-widgets \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          test "$count" -gt "0"
+      - name: Verify Elementor templates endpoint responds 200 on a fresh install
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/elementor-templates \
+            -H "Authorization: Bearer $TOKEN")
           test "$code" = "200"
       - name: Verify the Setup connection has all scopes (plugins list succeeds)
         run: |
