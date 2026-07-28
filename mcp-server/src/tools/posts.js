@@ -12,7 +12,10 @@ export function registerPostsTools(server, client) {
       },
     },
     async ({ type, status }) => {
-      const data = await client.request("GET", "/posts", { params: { type, status } });
+      const params = {};
+      if (type) params.type = type;
+      if (status) params.status = status;
+      const data = await client.request("GET", "/posts", { params });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );
