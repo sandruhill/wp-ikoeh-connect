@@ -43,3 +43,28 @@ add_action('rest_api_init', function () {
     Ikoeh_Connect_Rest_Logs::register_routes();
     Ikoeh_Connect_Rest_Cache::register_routes();
 });
+
+/**
+ * LiteSpeed Cache (and possibly other page-cache layers on this host) was
+ * caching GET responses from this namespace WITHOUT varying by the
+ * Authorization header, so an unauthenticated request could receive a
+ * cached response from an earlier authenticated one (confirmed via
+ * `x-litespeed-cache: hit` on a token-less request returning full data).
+ * This almost certainly explains much of the "state doesn't match what the
+ * API says" inconsistency seen across this whole integration: the API
+ * itself was sometimes reading real WordPress state, sometimes replaying a
+ * stale cached response. Every response from our namespace must be marked
+ * uncacheable at the LiteSpeed layer specifically, since it apparently
+ * does not fully honor the standard Cache-Control headers WordPress's own
+ * REST API already sends for this.
+ */
+add_filter('rest_pre_serve_request', function ($served, $result, $request) {
+    if (0 === strpos($request->get_route(), '/' . IKOEH_CONNECT_REST_NAMESPACE)) {
+        if (!headers_sent()) {
+            header('X-LiteSpeed-Cache-Control: no-cache');
+            header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+            header('Pragma: no-cache');
+        }
+    }
+    return $served;
+}, 10, 3);
