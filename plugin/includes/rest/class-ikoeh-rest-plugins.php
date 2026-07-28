@@ -85,6 +85,22 @@ class Ikoeh_Connect_Rest_Plugins {
         rmdir($dir);
     }
 
+    /** Recursive copy, used as a fallback when rename() fails (e.g. source and destination on different filesystems). */
+    private static function rcopy($src, $dst) {
+        if (is_dir($src)) {
+            if (!is_dir($dst) && !wp_mkdir_p($dst)) {
+                return false;
+            }
+            foreach (array_diff(scandir($src), ['.', '..']) as $file) {
+                if (!self::rcopy("$src/$file", "$dst/$file")) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return copy($src, $dst);
+    }
+
     public static function handle_post(WP_REST_Request $request) {
         $content_type = (string) $request->get_header('content-type');
 
@@ -253,7 +269,34 @@ class Ikoeh_Connect_Rest_Plugins {
             unlink($destination);
         }
 
-        rename($source, $destination);
+        // rename() across filesystems (e.g. the temp dir used for extraction
+        // living on a different mount than wp-content, which varies by host
+        // and even by request) fails silently returning false rather than
+        // throwing. That failure was never checked before, so a failed move
+        // still reported "installed" while the destination was actually
+        // empty or missing. Now: verify the move, fall back to a recursive
+        // copy if rename() failed, and restore the previous version rather
+        // than leaving the site with a half-installed plugin.
+        $moved = @rename($source, $destination);
+
+        if (!$moved) {
+            $moved = self::rcopy($source, $destination)
+                && is_dir($destination)
+                && count(array_diff(scandir($destination), ['.', '..'])) > 0;
+        }
+
+        if (!$moved) {
+            self::rrmdir($destination);
+            if ($backup) {
+                rename($backup, $destination);
+            }
+            self::rrmdir($tmp_dir);
+            return new WP_Error(
+                'ikoeh_connect_install_failed',
+                'Could not move the new plugin files into place. The previous version, if any, was restored.',
+                ['status' => 500]
+            );
+        }
 
         if ($backup) {
             self::rrmdir($backup);

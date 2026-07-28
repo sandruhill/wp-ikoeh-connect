@@ -32,6 +32,14 @@ class Ikoeh_Connect_Rest_Site_Info {
                 'post_max_size'      => ini_get('post_max_size'),
                 'disable_functions'  => ini_get('disable_functions'),
             ],
+            // If these differ, rename() between the temp dir (used to
+            // extract uploaded plugin zips) and wp-content/plugins fails
+            // silently across the filesystem boundary, which was the real
+            // cause of plugin installs sometimes leaving an empty/missing
+            // directory. Same device number = same filesystem = rename()
+            // is safe; different = the copy fallback is what's actually
+            // moving files into place.
+            'fs_same_device'        => @stat(get_temp_dir())['dev'] === @stat(WP_PLUGIN_DIR)['dev'],
         ], 200);
     }
 }
