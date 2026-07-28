@@ -89,7 +89,8 @@ class Ikoeh_Connect_Rest_Plugins {
         $content_type = (string) $request->get_header('content-type');
 
         if (0 === stripos($content_type, 'application/zip')) {
-            return self::install_plugin($request);
+            $is_mu = 'mu' === $request->get_param('target');
+            return self::install_from_bytes($request->get_body(), $is_mu);
         }
 
         $params = $request->get_json_params();
@@ -104,22 +105,87 @@ class Ikoeh_Connect_Rest_Plugins {
             return self::deactivate_plugin($slug);
         }
 
+        if ('install' === $action) {
+            $is_mu = isset($params['target']) && 'mu' === $params['target'];
+
+            if (!empty($slug)) {
+                return self::install_from_wordpress_org($slug, $is_mu);
+            }
+
+            if (!empty($params['url'])) {
+                return self::install_from_url(esc_url_raw($params['url']), $is_mu);
+            }
+
+            return new WP_Error(
+                'ikoeh_connect_invalid_request',
+                'JSON install requires "slug" (a WordPress.org plugin) or "url" (a direct zip URL).',
+                ['status' => 400]
+            );
+        }
+
         return new WP_Error(
             'ikoeh_connect_invalid_request',
-            'Send the zip bytes with Content-Type: application/zip to install, or JSON {"action":"activate|deactivate","slug":"..."}.',
+            'Send zip bytes with Content-Type: application/zip to install from a local file, or JSON ' .
+                '{"action":"install","slug":"..."} / {"action":"install","url":"..."} to install server-side, ' .
+                'or {"action":"activate|deactivate","slug":"..."}.',
             ['status' => 400]
         );
     }
 
-    public static function install_plugin(WP_REST_Request $request) {
-        self::ensure_plugin_functions();
-
-        $body = $request->get_body();
-        if (empty($body)) {
-            return new WP_Error('ikoeh_connect_empty_body', 'Request body must be the plugin zip bytes.', ['status' => 400]);
+    /**
+     * Installs a plugin straight from WordPress.org by slug: the server
+     * looks up the current download URL itself via plugins_api() (WP
+     * core's own function for this) and fetches the zip server-side, so no
+     * zip needs to be downloaded locally and re-uploaded through the API.
+     */
+    private static function install_from_wordpress_org($slug, $is_mu) {
+        if (!function_exists('plugins_api')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
         }
 
-        $is_mu = 'mu' === $request->get_param('target');
+        $info = plugins_api('plugin_information', [
+            'slug'   => $slug,
+            'fields' => ['sections' => false],
+        ]);
+
+        if (is_wp_error($info)) {
+            return new WP_Error('ikoeh_connect_lookup_failed', $info->get_error_message(), ['status' => 400]);
+        }
+
+        if (empty($info->download_link)) {
+            return new WP_Error('ikoeh_connect_lookup_failed', 'No download link found for that slug.', ['status' => 400]);
+        }
+
+        return self::install_from_url($info->download_link, $is_mu);
+    }
+
+    /** Fetches an arbitrary zip URL server-side, then installs it the same way an uploaded zip would be. */
+    private static function install_from_url($url, $is_mu) {
+        self::ensure_plugin_functions();
+
+        if (!function_exists('download_url')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+
+        $tmp_file = download_url($url);
+
+        if (is_wp_error($tmp_file)) {
+            return new WP_Error('ikoeh_connect_download_failed', $tmp_file->get_error_message(), ['status' => 400]);
+        }
+
+        $bytes = file_get_contents($tmp_file);
+        @unlink($tmp_file);
+
+        return self::install_from_bytes($bytes, $is_mu);
+    }
+
+    public static function install_from_bytes($body, $is_mu) {
+        self::ensure_plugin_functions();
+
+        if (empty($body)) {
+            return new WP_Error('ikoeh_connect_empty_body', 'No plugin zip bytes to install.', ['status' => 400]);
+        }
+
         $target = $is_mu ? WPMU_PLUGIN_DIR : WP_PLUGIN_DIR;
 
         if ($is_mu && !file_exists(WPMU_PLUGIN_DIR)) {

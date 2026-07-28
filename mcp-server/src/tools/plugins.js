@@ -36,6 +36,27 @@ export function registerPluginTools(server, client) {
   );
 
   server.registerTool(
+    "wp_install_plugin_from_source",
+    {
+      title: "Install WordPress Plugin From WordPress.org or a URL",
+      description:
+        "Install a plugin server-side, without downloading it locally first. Use slug for a WordPress.org " +
+        "plugin (the site looks up the current download link itself), or url for a direct zip URL.",
+      inputSchema: {
+        slug: z.string().optional().describe("WordPress.org plugin slug, e.g. \"elementor\""),
+        url: z.string().optional().describe("Direct URL to a plugin zip, used if slug is not given"),
+        target: z.enum(["plugins", "mu"]).default("plugins").describe("Install into wp-content/plugins or wp-content/mu-plugins"),
+      },
+    },
+    async ({ slug, url, target }) => {
+      const data = await client.request("POST", "/plugins", {
+        json: { action: "install", slug, url, target },
+      });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
     "wp_activate_plugin",
     {
       title: "Activate WordPress Plugin",
