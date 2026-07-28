@@ -186,6 +186,14 @@ class Ikoeh_Connect_Rest_Plugins {
             return new WP_Error('ikoeh_connect_empty_body', 'No plugin zip bytes to install.', ['status' => 400]);
         }
 
+        // Large plugins (multi-MB zips, thousands of files) can exceed the
+        // default max_execution_time mid-extraction, leaving the plugin
+        // directory partially written. @-suppressed because some hosts
+        // disable these via disable_functions; if so, this is a no-op and
+        // the underlying host limit still applies.
+        @set_time_limit(300);
+        @ini_set('memory_limit', '512M');
+
         $target = $is_mu ? WPMU_PLUGIN_DIR : WP_PLUGIN_DIR;
 
         if ($is_mu && !file_exists(WPMU_PLUGIN_DIR)) {

@@ -22,6 +22,13 @@ class Ikoeh_Connect_Rest_Site_Info {
             'active_theme'          => get_stylesheet(),
             'active_plugins'        => get_option('active_plugins', []),
             'ikoeh_connect_version' => IKOEH_CONNECT_VERSION,
+            'php_limits'            => [
+                'max_execution_time' => ini_get('max_execution_time'),
+                'memory_limit'       => ini_get('memory_limit'),
+                'upload_max_filesize' => ini_get('upload_max_filesize'),
+                'post_max_size'      => ini_get('post_max_size'),
+                'disable_functions'  => ini_get('disable_functions'),
+            ],
         ], 200);
     }
 }
