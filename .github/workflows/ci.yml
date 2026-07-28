@@ -98,6 +98,18 @@ jobs:
           code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/elementor-templates \
             -H "Authorization: Bearer $TOKEN")
           test "$code" = "200"
+      - name: Verify Elementor content write normalizes and clears cache
+        run: |
+          POST_ID=$(docker compose run --rm wp-cli wp post create --post_type=page \
+            --post_title="CI Elementor Test" --post_status=publish --porcelain --path=/var/www/html)
+          curl -sS -X PUT "http://localhost:8080/wp-json/ikoeh-connect/v1/elementor-content?id=$POST_ID" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"elements":[{"id":"abc123","elType":"container","settings":[],"elements":[]}]}'
+          width=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/elementor-content?id=$POST_ID" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['elements'][0]['settings']['content_width'])")
+          test "$width" = "full"
+          css_meta=$(docker compose run --rm wp-cli wp post meta get "$POST_ID" _elementor_css --path=/var/www/html || true)
+          test -z "$css_meta"
       - name: Verify the Setup connection has all scopes (plugins list succeeds)
         run: |
           code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/plugins \
