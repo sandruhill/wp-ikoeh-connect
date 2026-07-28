@@ -816,3 +816,326 @@ Expected: `php-lint`, `mcp-server`, and `integration` jobs all pass.
 ```bash
 docker compose down -v
 ```
+
+---
+
+### Task 5: Media upload (raw bytes) and MCP tool
+
+**Files:**
+- Modify: `plugin/includes/class-ikoeh-auth.php` (add `'media'` to `ALL_SCOPES`)
+- Modify: `plugin/includes/class-ikoeh-admin.php` (add label for `'media'` to `SCOPE_LABELS`)
+- Create: `plugin/includes/rest/class-ikoeh-rest-media.php`
+- Modify: `plugin/wp-ikoeh-connect.php` (require + register)
+- Create: `mcp-server/src/tools/media.js`
+- Modify: `mcp-server/src/index.js` (register)
+
+**Interfaces:**
+- Produces: `POST /wp-json/ikoeh-connect/v1/media` — request body is the raw image bytes (any `Content-Type: image/*`), with the desired filename in an `X-Filename` header. Response `{ id, url }` on success (HTTP 201).
+- Produces: MCP tool `wp_upload_media({ filename, content_base64 })` — the MCP layer accepts base64 (MCP tool args are JSON, can't carry raw binary), decodes it, and sends raw bytes to the REST endpoint.
+- Consumes: `Ikoeh_Connect_Auth::require_scope('media')`.
+
+- [ ] **Step 1: Add the scope**
+
+`plugin/includes/class-ikoeh-auth.php`, `ALL_SCOPES` becomes:
+
+```php
+    const ALL_SCOPES = ['plugins', 'content', 'db', 'logs_cache', 'elementor', 'theme', 'media'];
+```
+
+`plugin/includes/class-ikoeh-admin.php`, `SCOPE_LABELS` gets one more entry:
+
+```php
+        'media'      => 'Mídia',
+```
+
+- [ ] **Step 2: Create the Media REST controller**
+
+Create `plugin/includes/rest/class-ikoeh-rest-media.php`:
+
+```php
+<?php
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class Ikoeh_Connect_Rest_Media {
+
+    public static function register_routes() {
+        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/media', [
+            'methods'             => 'POST',
+            'callback'            => [__CLASS__, 'upload'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('media'),
+        ]);
+    }
+
+    public static function upload(WP_REST_Request $request) {
+        $filename = $request->get_header('x-filename');
+        if (empty($filename)) {
+            return new WP_Error('ikoeh_connect_invalid_request', 'Missing X-Filename header.', ['status' => 400]);
+        }
+
+        $body = $request->get_body();
+        if (empty($body)) {
+            return new WP_Error('ikoeh_connect_empty_body', 'No image bytes provided.', ['status' => 400]);
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+
+        $tmp = wp_tempnam(sanitize_file_name($filename));
+        file_put_contents($tmp, $body);
+
+        $file_array = [
+            'name'     => sanitize_file_name($filename),
+            'tmp_name' => $tmp,
+        ];
+
+        // media_handle_sideload() runs WordPress's own mime/extension
+        // validation (wp_check_filetype_and_ext) before accepting the file,
+        // so a renamed non-image can't sneak in as an "image" upload.
+        $attachment_id = media_handle_sideload($file_array, 0);
+
+        if (is_wp_error($attachment_id)) {
+            if (file_exists($tmp)) {
+                @unlink($tmp);
+            }
+            return new WP_Error('ikoeh_connect_upload_failed', $attachment_id->get_error_message(), ['status' => 400]);
+        }
+
+        return new WP_REST_Response([
+            'id'  => $attachment_id,
+            'url' => wp_get_attachment_url($attachment_id),
+        ], 201);
+    }
+}
+```
+
+- [ ] **Step 3: Wire it into the plugin bootstrap**
+
+`plugin/wp-ikoeh-connect.php`: add `require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-media.php';` after the theme require, and `Ikoeh_Connect_Rest_Media::register_routes();` after `Ikoeh_Connect_Rest_Theme::register_routes();` in `rest_api_init`.
+
+- [ ] **Step 4: Create the MCP tool**
+
+Create `mcp-server/src/tools/media.js`:
+
+```js
+import { z } from "zod";
+
+export function registerMediaTools(server, client) {
+  server.registerTool(
+    "wp_upload_media",
+    {
+      title: "Upload Media",
+      description: "Upload an image to the WordPress media library. Provide the image as base64-encoded content; returns the new attachment's ID and public URL for use in Elementor widgets or post content.",
+      inputSchema: {
+        filename: z.string().min(1),
+        content_base64: z.string().min(1),
+      },
+    },
+    async ({ filename, content_base64 }) => {
+      const buffer = Buffer.from(content_base64, "base64");
+      const data = await client.requestRaw("POST", "/media", {
+        body: buffer,
+        headers: { "X-Filename": filename },
+      });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+}
+```
+
+This requires a small addition to `mcp-server/src/client.js`: the existing `request()` method only supports `json` and `rawBody` bodies with fixed content-types (`application/json`, `application/zip`) and no way to pass extra headers like `X-Filename`. Add a sibling method `requestRaw(method, path, { body, headers })` that sends `body` as-is with the caller's headers merged in on top of the `Authorization` header, content-type driven entirely by the caller (no default). Add it to `mcp-server/src/client.js` right after the existing `request()` method:
+
+```js
+  async requestRaw(method, path, { body, headers = {} } = {}) {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${this.token}`, ...headers },
+      body,
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : null;
+
+    if (!response.ok) {
+      const message = data && data.message ? data.message : response.statusText;
+      throw new Error(`WP iKOEH Connect API error (${response.status}): ${message}`);
+    }
+
+    return data;
+  }
+```
+
+- [ ] **Step 5: Register the tool module**
+
+`mcp-server/src/index.js`: import `registerMediaTools` after the theme import, call `registerMediaTools(server, client);` after `registerThemeTools(server, client);`. Run `node --check` on both modified/created JS files.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add plugin/includes/class-ikoeh-auth.php plugin/includes/class-ikoeh-admin.php \
+  plugin/includes/rest/class-ikoeh-rest-media.php plugin/wp-ikoeh-connect.php \
+  mcp-server/src/tools/media.js mcp-server/src/client.js mcp-server/src/index.js
+git commit -m "feat: add media upload endpoint and MCP tool"
+```
+
+Live verification (against a real site, not Docker — see Tasks 1-3's note on this repo's actual verification method): upload a small real image (base64-encode a tiny PNG), confirm the response has a valid `id` and `url`, fetch the `url` and confirm it 200s and is a real image.
+
+---
+
+### Task 6: Create and list posts/pages
+
+**Files:**
+- Create: `plugin/includes/rest/class-ikoeh-rest-posts.php`
+- Modify: `plugin/wp-ikoeh-connect.php` (require + register)
+- Create: `mcp-server/src/tools/posts.js`
+- Modify: `mcp-server/src/index.js` (register)
+
+**Interfaces:**
+- Produces: `GET /wp-json/ikoeh-connect/v1/posts` (optional `?type=page&status=publish`, defaults to `any` post type / `any` status) → array of `{ id, title, type, status }`.
+- Produces: `POST /wp-json/ikoeh-connect/v1/posts` body `{ title, type, status?, content? }` (`status` defaults to `draft`) → `{ id }` (HTTP 201). This is a NEW file rather than adding to the existing `/content` endpoint (which only handles an already-known ID) — keeps this task's diff isolated from `class-ikoeh-rest-content.php`, which has unrelated uncommitted changes sitting in the working tree.
+- Consumes: `Ikoeh_Connect_Auth::require_scope('content')` — reuses the existing `content` scope rather than adding a new one, since this is the same capability domain as `/content` and `/elementor-content`.
+- Produces: MCP tools `wp_list_posts({ type?, status? })`, `wp_create_post({ title, type, status?, content? })`.
+
+- [ ] **Step 1: Create the Posts REST controller**
+
+Create `plugin/includes/rest/class-ikoeh-rest-posts.php`:
+
+```php
+<?php
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class Ikoeh_Connect_Rest_Posts {
+
+    public static function register_routes() {
+        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/posts', [
+            [
+                'methods'             => 'GET',
+                'callback'            => [__CLASS__, 'list_posts'],
+                'permission_callback' => Ikoeh_Connect_Auth::require_scope('content'),
+            ],
+            [
+                'methods'             => 'POST',
+                'callback'            => [__CLASS__, 'create_post'],
+                'permission_callback' => Ikoeh_Connect_Auth::require_scope('content'),
+            ],
+        ]);
+    }
+
+    public static function list_posts(WP_REST_Request $request) {
+        $type = $request->get_param('type') ?: 'any';
+        $status = $request->get_param('status') ?: 'any';
+
+        $query = new WP_Query([
+            'post_type'      => sanitize_key($type) === 'any' ? 'any' : sanitize_key($type),
+            'post_status'    => $status === 'any' ? 'any' : sanitize_key($status),
+            'posts_per_page' => 100,
+        ]);
+
+        $result = [];
+        foreach ($query->posts as $post) {
+            $result[] = [
+                'id'     => $post->ID,
+                'title'  => $post->post_title,
+                'type'   => $post->post_type,
+                'status' => $post->post_status,
+            ];
+        }
+        return new WP_REST_Response($result, 200);
+    }
+
+    public static function create_post(WP_REST_Request $request) {
+        $params = $request->get_json_params();
+
+        if (empty($params['title'])) {
+            return new WP_Error('ikoeh_connect_invalid_params', 'Missing "title".', ['status' => 400]);
+        }
+        if (empty($params['type'])) {
+            return new WP_Error('ikoeh_connect_invalid_params', 'Missing "type" (e.g. "post" or "page").', ['status' => 400]);
+        }
+
+        $post_id = wp_insert_post([
+            'post_title'   => sanitize_text_field($params['title']),
+            'post_type'    => sanitize_key($params['type']),
+            'post_status'  => isset($params['status']) ? sanitize_key($params['status']) : 'draft',
+            'post_content' => isset($params['content']) ? wp_slash($params['content']) : '',
+        ], true);
+
+        if (is_wp_error($post_id)) {
+            return new WP_Error('ikoeh_connect_create_failed', $post_id->get_error_message(), ['status' => 400]);
+        }
+
+        return new WP_REST_Response(['id' => $post_id], 201);
+    }
+}
+```
+
+- [ ] **Step 2: Wire it into the plugin bootstrap**
+
+`plugin/wp-ikoeh-connect.php`: add `require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-posts.php';` after the media require, and `Ikoeh_Connect_Rest_Posts::register_routes();` after `Ikoeh_Connect_Rest_Media::register_routes();` in `rest_api_init`.
+
+- [ ] **Step 3: Create the MCP tool module**
+
+Create `mcp-server/src/tools/posts.js`:
+
+```js
+import { z } from "zod";
+
+export function registerPostsTools(server, client) {
+  server.registerTool(
+    "wp_list_posts",
+    {
+      title: "List Posts/Pages",
+      description: "List existing posts/pages by type and status (defaults to any type, any status). Returns id, title, type, status for up to 100 results.",
+      inputSchema: {
+        type: z.string().optional(),
+        status: z.string().optional(),
+      },
+    },
+    async ({ type, status }) => {
+      const data = await client.request("GET", "/posts", { params: { type, status } });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
+    "wp_create_post",
+    {
+      title: "Create Post/Page",
+      description: "Create a new post or page from scratch. status defaults to draft.",
+      inputSchema: {
+        title: z.string().min(1),
+        type: z.string().min(1),
+        status: z.string().optional(),
+        content: z.string().optional(),
+      },
+    },
+    async ({ title, type, status, content }) => {
+      const data = await client.request("POST", "/posts", { json: { title, type, status, content } });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+}
+```
+
+- [ ] **Step 4: Register the tool module**
+
+`mcp-server/src/index.js`: import `registerPostsTools` after the media import, call `registerPostsTools(server, client);` after `registerMediaTools(server, client);`. Run `node --check` on both files.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add plugin/includes/rest/class-ikoeh-rest-posts.php plugin/wp-ikoeh-connect.php \
+  mcp-server/src/tools/posts.js mcp-server/src/index.js
+git commit -m "feat: add post/page list and create endpoints and MCP tools"
+```
+
+Live verification: create a draft page via `POST /posts`, confirm it appears in `GET /posts?type=page&status=draft`, clean up (delete) the test post afterward.
+
+---
+
+### Deferred to a future spec (not part of this plan)
+
+Per user request during execution: navigation menus, SEO tooling, and broader security hardening are each substantial enough to warrant their own brainstorming/spec pass (same reasoning already applied to Metform in the original spec) rather than being appended here without scoping. Revisit as separate plans when prioritized.
