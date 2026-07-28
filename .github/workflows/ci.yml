@@ -74,6 +74,14 @@ jobs:
         run: |
           docker compose run --rm wp-cli wp rewrite structure '/%postname%/' --path=/var/www/html
           docker compose run --rm wp-cli wp rewrite flush --path=/var/www/html
+      - name: Fix wp-content permissions for the wp-cli container
+        # The `wordpress` and `wp-cli` images run their processes as different
+        # UIDs by default. wp-content is created/owned by whichever container
+        # touches it first (the `wordpress` service, on boot), so the wp-cli
+        # container's plugin-install step fails with "Could not create
+        # directory wp-content/upgrade" without this. Widening perms is fine
+        # here: this is a throwaway CI container, not production.
+        run: docker compose exec -T -u root wordpress chmod -R 777 wp-content
       - name: Install and activate Elementor
         run: docker compose run --rm wp-cli wp plugin install elementor --activate --path=/var/www/html
       - name: Verify REST API rejects unauthenticated requests
