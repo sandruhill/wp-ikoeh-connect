@@ -41,7 +41,7 @@ class Ikoeh_Connect_Rest_Theme {
             'stylesheet'     => $theme->get_stylesheet(),
             'is_block_theme' => wp_is_block_theme(),
             'is_child_theme' => $is_child,
-            'parent'         => $is_child ? $theme->parent()->get_stylesheet() : null,
+            'parent'         => $is_child && $theme->parent() ? $theme->parent()->get_stylesheet() : null,
         ], 200);
     }
 

@@ -169,13 +169,13 @@ class Ikoeh_Connect_Rest_Elementor {
      * - top-level containers need settings.content_width = "full", or they
      *   render boxed at 1140px regardless of inner widget config
      */
-    private static function normalize_elements(array $elements) {
+    private static function normalize_elements(array $elements, $depth = 0) {
         foreach ($elements as &$element) {
             if (!isset($element['elements']) || !is_array($element['elements'])) {
                 $element['elements'] = [];
             }
 
-            if (($element['elType'] ?? null) === 'container') {
+            if ($depth === 0 && ($element['elType'] ?? null) === 'container') {
                 if (!isset($element['settings']) || !is_array($element['settings'])) {
                     $element['settings'] = [];
                 }
@@ -185,7 +185,7 @@ class Ikoeh_Connect_Rest_Elementor {
             }
 
             if (!empty($element['elements'])) {
-                $element['elements'] = self::normalize_elements($element['elements']);
+                $element['elements'] = self::normalize_elements($element['elements'], $depth + 1);
             }
         }
         return $elements;
