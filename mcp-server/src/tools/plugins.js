@@ -27,7 +27,7 @@ export function registerPluginTools(server, client) {
     },
     async ({ zipPath, target }) => {
       const bytes = readFileSync(zipPath);
-      const data = await client.request("POST", "/plugins/install", {
+      const data = await client.request("POST", "/plugins", {
         params: target === "mu" ? { target: "mu" } : undefined,
         rawBody: bytes,
       });
@@ -43,7 +43,7 @@ export function registerPluginTools(server, client) {
       inputSchema: { slug: z.string() },
     },
     async ({ slug }) => {
-      const data = await client.request("POST", `/plugins/${encodeURIComponent(slug)}/activate`);
+      const data = await client.request("POST", "/plugins", { json: { action: "activate", slug } });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -56,7 +56,7 @@ export function registerPluginTools(server, client) {
       inputSchema: { slug: z.string() },
     },
     async ({ slug }) => {
-      const data = await client.request("POST", `/plugins/${encodeURIComponent(slug)}/deactivate`);
+      const data = await client.request("POST", "/plugins", { json: { action: "deactivate", slug } });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -69,7 +69,7 @@ export function registerPluginTools(server, client) {
       inputSchema: { slug: z.string() },
     },
     async ({ slug }) => {
-      const data = await client.request("DELETE", `/plugins/${encodeURIComponent(slug)}`);
+      const data = await client.request("DELETE", "/plugins", { params: { slug } });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );

@@ -7,7 +7,7 @@ export function registerCacheTools(server, client) {
       inputSchema: {},
     },
     async () => {
-      const data = await client.request("POST", "/cache/flush");
+      const data = await client.request("POST", "/cache");
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );

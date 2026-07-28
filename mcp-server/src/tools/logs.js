@@ -9,7 +9,7 @@ export function registerLogTools(server, client) {
       inputSchema: { lines: z.number().int().positive().max(1000).default(100) },
     },
     async ({ lines }) => {
-      const data = await client.request("GET", "/logs/debug", { params: { lines } });
+      const data = await client.request("GET", "/logs", { params: { lines } });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );

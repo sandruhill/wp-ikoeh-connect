@@ -3,37 +3,33 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+/**
+ * All routes stay at exactly 3 path segments (namespace/version/plugins)
+ * because this host blocks any REST path with 4+ segments before it ever
+ * reaches WordPress (confirmed by testing WordPress core's own routes,
+ * e.g. /wp-json/wp/v2/pages/1 also 404s on this host while /wp-json/wp/v2/pages
+ * does not). install/activate/deactivate/delete are dispatched by HTTP
+ * method and body content instead of by extra path segments.
+ */
 class Ikoeh_Connect_Rest_Plugins {
 
     public static function register_routes() {
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/plugins', [
-            'methods'             => 'GET',
-            'callback'            => [__CLASS__, 'list_plugins'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
-        ]);
-
-        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/plugins/install', [
-            'methods'             => 'POST',
-            'callback'            => [__CLASS__, 'install_plugin'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
-        ]);
-
-        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/plugins/(?P<slug>[^/]+)/activate', [
-            'methods'             => 'POST',
-            'callback'            => [__CLASS__, 'activate_plugin'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
-        ]);
-
-        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/plugins/(?P<slug>[^/]+)/deactivate', [
-            'methods'             => 'POST',
-            'callback'            => [__CLASS__, 'deactivate_plugin'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
-        ]);
-
-        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/plugins/(?P<slug>[^/]+)', [
-            'methods'             => 'DELETE',
-            'callback'            => [__CLASS__, 'delete_plugin'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
+            [
+                'methods'             => 'GET',
+                'callback'            => [__CLASS__, 'list_plugins'],
+                'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
+            ],
+            [
+                'methods'             => 'POST',
+                'callback'            => [__CLASS__, 'handle_post'],
+                'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
+            ],
+            [
+                'methods'             => 'DELETE',
+                'callback'            => [__CLASS__, 'delete_plugin'],
+                'permission_callback' => Ikoeh_Connect_Auth::require_scope('plugins'),
+            ],
         ]);
     }
 
@@ -87,6 +83,32 @@ class Ikoeh_Connect_Rest_Plugins {
             is_dir($path) ? self::rrmdir($path) : unlink($path);
         }
         rmdir($dir);
+    }
+
+    public static function handle_post(WP_REST_Request $request) {
+        $content_type = (string) $request->get_header('content-type');
+
+        if (0 === stripos($content_type, 'application/zip')) {
+            return self::install_plugin($request);
+        }
+
+        $params = $request->get_json_params();
+        $action = isset($params['action']) ? sanitize_key($params['action']) : '';
+        $slug = isset($params['slug']) ? sanitize_text_field($params['slug']) : '';
+
+        if ('activate' === $action) {
+            return self::activate_plugin($slug);
+        }
+
+        if ('deactivate' === $action) {
+            return self::deactivate_plugin($slug);
+        }
+
+        return new WP_Error(
+            'ikoeh_connect_invalid_request',
+            'Send the zip bytes with Content-Type: application/zip to install, or JSON {"action":"activate|deactivate","slug":"..."}.',
+            ['status' => 400]
+        );
     }
 
     public static function install_plugin(WP_REST_Request $request) {
@@ -177,8 +199,8 @@ class Ikoeh_Connect_Rest_Plugins {
         return new WP_REST_Response(['installed' => $entry_name, 'target' => $is_mu ? 'mu-plugins' : 'plugins'], 200);
     }
 
-    public static function activate_plugin(WP_REST_Request $request) {
-        $plugin_file = self::find_plugin_file($request->get_param('slug'));
+    public static function activate_plugin($slug) {
+        $plugin_file = self::find_plugin_file($slug);
         if (!$plugin_file) {
             return new WP_Error('ikoeh_connect_not_found', 'Plugin not found.', ['status' => 404]);
         }
@@ -189,8 +211,8 @@ class Ikoeh_Connect_Rest_Plugins {
         return new WP_REST_Response(['activated' => $plugin_file], 200);
     }
 
-    public static function deactivate_plugin(WP_REST_Request $request) {
-        $plugin_file = self::find_plugin_file($request->get_param('slug'));
+    public static function deactivate_plugin($slug) {
+        $plugin_file = self::find_plugin_file($slug);
         if (!$plugin_file) {
             return new WP_Error('ikoeh_connect_not_found', 'Plugin not found.', ['status' => 404]);
         }
@@ -200,7 +222,7 @@ class Ikoeh_Connect_Rest_Plugins {
 
     public static function delete_plugin(WP_REST_Request $request) {
         self::ensure_plugin_functions();
-        $plugin_file = self::find_plugin_file($request->get_param('slug'));
+        $plugin_file = self::find_plugin_file(sanitize_text_field($request->get_param('slug')));
         if (!$plugin_file) {
             return new WP_Error('ikoeh_connect_not_found', 'Plugin not found.', ['status' => 404]);
         }

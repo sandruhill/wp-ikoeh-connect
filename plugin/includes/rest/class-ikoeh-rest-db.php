@@ -8,8 +8,12 @@ class Ikoeh_Connect_Rest_Db {
     private static $read_prefixes = ['SELECT', 'SHOW', 'DESCRIBE', 'DESC ', 'EXPLAIN'];
     const AUTO_LIMIT = 1000;
 
+    // Route is /dbquery, not /db/query: this host blocks any REST path with
+    // 4+ segments before WordPress even sees the request (confirmed against
+    // WordPress core's own routes too), so the resource name is a single
+    // path segment instead of two.
     public static function register_routes() {
-        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/db/query', [
+        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/dbquery', [
             'methods'             => 'POST',
             'callback'            => [__CLASS__, 'handle'],
             'permission_callback' => Ikoeh_Connect_Auth::require_scope('db'),

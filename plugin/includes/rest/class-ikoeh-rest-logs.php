@@ -7,8 +7,12 @@ class Ikoeh_Connect_Rest_Logs {
 
     const READ_CHUNK_BYTES = 8192;
 
+    // Route is /logs, not /logs/debug: this host blocks any REST path with
+    // 4+ segments before WordPress even sees the request (confirmed against
+    // WordPress core's own routes too). debug.log is the only log this
+    // plugin exposes, so the resource name alone is unambiguous.
     public static function register_routes() {
-        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/logs/debug', [
+        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/logs', [
             'methods'             => 'GET',
             'callback'            => [__CLASS__, 'handle'],
             'permission_callback' => Ikoeh_Connect_Auth::require_scope('logs_cache'),

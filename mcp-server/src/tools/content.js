@@ -9,7 +9,7 @@ export function registerContentTools(server, client) {
       inputSchema: { id: z.number().int().positive() },
     },
     async ({ id }) => {
-      const data = await client.request("GET", `/content/${id}`);
+      const data = await client.request("GET", "/content", { params: { id } });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -27,7 +27,8 @@ export function registerContentTools(server, client) {
       },
     },
     async ({ id, title, content, meta }) => {
-      const data = await client.request("PUT", `/content/${id}`, {
+      const data = await client.request("PUT", "/content", {
+        params: { id },
         json: { title, content, meta },
       });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };

@@ -5,17 +5,24 @@ if (!defined('ABSPATH')) {
 
 class Ikoeh_Connect_Rest_Content {
 
+    /**
+     * The id is a query param (?id=1), not a path segment: this host blocks
+     * any REST path with 4+ segments before WordPress even sees the request
+     * (confirmed against WordPress core's own routes too), so /content
+     * stays at exactly 3 segments regardless of which post is targeted.
+     */
     public static function register_routes() {
-        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/content/(?P<id>\d+)', [
-            'methods'             => 'GET',
-            'callback'            => [__CLASS__, 'get_content'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('content'),
-        ]);
-
-        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/content/(?P<id>\d+)', [
-            'methods'             => 'PUT',
-            'callback'            => [__CLASS__, 'update_content'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('content'),
+        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/content', [
+            [
+                'methods'             => 'GET',
+                'callback'            => [__CLASS__, 'get_content'],
+                'permission_callback' => Ikoeh_Connect_Auth::require_scope('content'),
+            ],
+            [
+                'methods'             => 'PUT',
+                'callback'            => [__CLASS__, 'update_content'],
+                'permission_callback' => Ikoeh_Connect_Auth::require_scope('content'),
+            ],
         ]);
     }
 
