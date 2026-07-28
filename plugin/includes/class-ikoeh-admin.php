@@ -12,6 +12,7 @@ class Ikoeh_Connect_Admin {
         'logs_cache' => 'Logs e cache',
         'elementor'  => 'Elementor',
         'theme'      => 'Temas',
+        'media'      => 'Mídia',
     ];
 
     const NAME_OPTIONS = ['ChatGPT', 'Claude.ai', 'Claude Code', 'Outro'];

@@ -36,4 +36,21 @@ export class IkoehClient {
 
     return data;
   }
+
+  async requestRaw(method, path, { body, headers = {} } = {}) {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${this.token}`, ...headers },
+      body,
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : null;
+
+    if (!response.ok) {
+      const message = data && data.message ? data.message : response.statusText;
+      throw new Error(`WP iKOEH Connect API error (${response.status}): ${message}`);
+    }
+
+    return data;
+  }
 }

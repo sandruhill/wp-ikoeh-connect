@@ -30,6 +30,7 @@ require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-logs.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-cache.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-elementor.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-theme.php';
+require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-media.php';
 
 add_action('init', ['Ikoeh_Connect_Auth', 'maybe_migrate']);
 
@@ -46,6 +47,7 @@ add_action('rest_api_init', function () {
     Ikoeh_Connect_Rest_Cache::register_routes();
     Ikoeh_Connect_Rest_Elementor::register_routes();
     Ikoeh_Connect_Rest_Theme::register_routes();
+    Ikoeh_Connect_Rest_Media::register_routes();
 });
 
 /**

@@ -12,6 +12,7 @@ import { registerLogTools } from "./tools/logs.js";
 import { registerCacheTools } from "./tools/cache.js";
 import { registerElementorTools } from "./tools/elementor.js";
 import { registerThemeTools } from "./tools/theme.js";
+import { registerMediaTools } from "./tools/media.js";
 
 const siteName = process.argv[2];
 
@@ -34,6 +35,7 @@ registerLogTools(server, client);
 registerCacheTools(server, client);
 registerElementorTools(server, client);
 registerThemeTools(server, client);
+registerMediaTools(server, client);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
