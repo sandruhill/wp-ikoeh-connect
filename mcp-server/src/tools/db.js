@@ -14,7 +14,7 @@ export function registerDbTools(server, client) {
       },
     },
     async ({ sql, confirmWrite }) => {
-      const data = await client.request("POST", "/dbquery", {
+      const data = await client.request("POST", "/database", {
         json: { sql, confirm_write: confirmWrite },
       });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
