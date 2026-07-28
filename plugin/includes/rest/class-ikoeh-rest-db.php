@@ -52,11 +52,17 @@ class Ikoeh_Connect_Rest_Db {
             // can exhaust the PHP memory_limit on shared hosting. A missing LIMIT
             // gets one added automatically instead of running unbounded.
             $sql = self::apply_auto_limit($sql);
+            $wpdb->last_error = '';
             $rows = $wpdb->get_results($sql, ARRAY_A);
-            if (null === $rows && $wpdb->last_error) {
+            // $wpdb->get_results() can return an empty array both for a
+            // genuinely empty result set AND for some query errors, not
+            // just null, so last_error must be checked regardless of what
+            // $rows looks like, or a failed query silently reads as "zero
+            // rows" instead of surfacing the real problem.
+            if ($wpdb->last_error) {
                 return new WP_Error('ikoeh_connect_query_failed', $wpdb->last_error, ['status' => 400]);
             }
-            return new WP_REST_Response(['rows' => $rows, 'sql_executed' => $sql], 200);
+            return new WP_REST_Response(['rows' => $rows, 'row_count' => count((array) $rows), 'sql_executed' => $sql], 200);
         }
 
         if (empty($params['confirm_write'])) {
