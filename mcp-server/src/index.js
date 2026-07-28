@@ -11,6 +11,7 @@ import { registerDbTools } from "./tools/db.js";
 import { registerLogTools } from "./tools/logs.js";
 import { registerCacheTools } from "./tools/cache.js";
 import { registerElementorTools } from "./tools/elementor.js";
+import { registerThemeTools } from "./tools/theme.js";
 
 const siteName = process.argv[2];
 
@@ -32,6 +33,7 @@ registerDbTools(server, client);
 registerLogTools(server, client);
 registerCacheTools(server, client);
 registerElementorTools(server, client);
+registerThemeTools(server, client);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
