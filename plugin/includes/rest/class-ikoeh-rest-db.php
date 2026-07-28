@@ -31,6 +31,12 @@ class Ikoeh_Connect_Rest_Db {
     }
 
     private static function apply_auto_limit($sql) {
+        // Only SELECT supports LIMIT. SHOW/DESCRIBE/EXPLAIN do not accept it
+        // in MySQL/MariaDB and would fail with a syntax error if one were
+        // appended, so those pass through unmodified.
+        if (0 !== stripos(ltrim($sql), 'SELECT')) {
+            return $sql;
+        }
         if (preg_match('/\bLIMIT\s+\d/i', $sql)) {
             return $sql;
         }

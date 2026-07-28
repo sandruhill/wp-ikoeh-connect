@@ -14,7 +14,7 @@ class Ikoeh_Connect_Rest_Site_Info {
     }
 
     public static function handle(WP_REST_Request $request) {
-        global $wp_version;
+        global $wp_version, $wpdb;
 
         return new WP_REST_Response([
             'wp_version'            => $wp_version,
@@ -22,6 +22,9 @@ class Ikoeh_Connect_Rest_Site_Info {
             'active_theme'          => get_stylesheet(),
             'active_plugins'        => get_option('active_plugins', []),
             'ikoeh_connect_version' => IKOEH_CONNECT_VERSION,
+            // Table prefix is NOT always "wp_": always read this instead of
+            // assuming, before writing any raw SQL against this site.
+            'db_prefix'             => $wpdb->prefix,
             'php_limits'            => [
                 'max_execution_time' => ini_get('max_execution_time'),
                 'memory_limit'       => ini_get('memory_limit'),
