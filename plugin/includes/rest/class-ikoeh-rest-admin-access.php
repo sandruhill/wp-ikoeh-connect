@@ -164,19 +164,31 @@ class Ikoeh_Connect_Rest_Admin_Access {
 
         $login_url = add_query_arg('nonce', $login_nonce, rest_url(IKOEH_CONNECT_REST_NAMESPACE . '/admin-access-login'));
 
-        return new WP_REST_Response([
+        $response = new WP_REST_Response([
             'login_url'           => $login_url,
             'expires_at'          => $login_expires_at,
             'session_expires_in'  => $access['session_expires_in'],
             'redirect_url'        => $access['redirect_url'],
             'one_time'            => true,
         ], 200);
+        self::no_cache_headers($response);
+        return $response;
     }
 
     /**
      * Step 3: redeem the one-time login nonce and log the browser in.
      */
     public static function login(WP_REST_Request $request) {
+        // Plain response headers (Cache-Control, X-LiteSpeed-Cache-Control)
+        // were not enough: LiteSpeed Cache's WordPress plugin makes its own
+        // caching decision, not just the webserver, and confirmed in
+        // production it still cached this exact URL (x-litespeed-cache:
+        // hit on a second request) even with those headers set. This is the
+        // plugin's own documented hook for marking the current request
+        // uncacheable, called as early as possible in case its decision
+        // point runs before this method returns.
+        do_action('litespeed_control_set_nocache', 'ikoeh-connect admin-access one-time login');
+
         $nonce = trim((string) $request->get_param('nonce'));
         if ('' === $nonce) {
             return new WP_Error('ikoeh_connect_missing_nonce', 'Missing admin access login nonce.', ['status' => 401]);
@@ -215,7 +227,27 @@ class Ikoeh_Connect_Rest_Admin_Access {
         $response = new WP_REST_Response(null, 302);
         $response->header('Location', $access['redirect_url']);
         $response->header('Referrer-Policy', 'no-referrer');
+        self::no_cache_headers($response);
         return $response;
+    }
+
+    /**
+     * Set anti-cache headers directly on the response object rather than
+     * relying only on the global rest_pre_serve_request filter in
+     * wp-ikoeh-connect.php: that filter calls header() itself and skips if
+     * headers_sent() is already true, which happens for this route because
+     * WP_REST_Server::send_headers() flushes the Location/status line for a
+     * redirect before the filter runs. Confirmed in production: without
+     * this, LiteSpeed cached the 302 by URL (x-litespeed-cache: hit on a
+     * second request), replaying the redirect instead of running the
+     * one-time-use check that should reject a reused nonce -- the exact
+     * same class of bug already documented for GET responses on this host
+     * (see the Authorization-unaware caching note in wp-ikoeh-connect.php).
+     */
+    private static function no_cache_headers(WP_REST_Response $response) {
+        $response->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        $response->header('Pragma', 'no-cache');
+        $response->header('X-LiteSpeed-Cache-Control', 'no-cache');
     }
 
     /**
