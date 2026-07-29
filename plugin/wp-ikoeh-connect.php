@@ -34,6 +34,7 @@ require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-media.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-posts.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-admin-access.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-gutenberg-store.php';
+require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-gutenberg.php';
 
 add_action('init', ['Ikoeh_Connect_Auth', 'maybe_migrate']);
 add_action('init', ['Ikoeh_Connect_Gutenberg_Store', 'register_post_type']);
@@ -54,6 +55,7 @@ add_action('rest_api_init', function () {
     Ikoeh_Connect_Rest_Media::register_routes();
     Ikoeh_Connect_Rest_Posts::register_routes();
     Ikoeh_Connect_Rest_Admin_Access::register_routes();
+    Ikoeh_Connect_Rest_Gutenberg::register_routes();
 });
 
 /**

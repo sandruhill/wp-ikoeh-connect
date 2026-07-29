@@ -14,6 +14,7 @@ class Ikoeh_Connect_Admin {
         'theme'      => 'Temas',
         'media'      => 'Mídia',
         'admin_access' => 'Acesso admin temporário',
+        'gutenberg' => 'Gutenberg (mudancas pendentes)',
     ];
 
     const NAME_OPTIONS = ['ChatGPT', 'Claude.ai', 'Claude Code', 'Outro'];

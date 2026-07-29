@@ -142,6 +142,25 @@ jobs:
           code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/plugins \
             -H "Authorization: Bearer not-a-real-token")
           test "$code" = "401"
+      - name: Verify Gutenberg batch create/read/enable-finalization round-trips
+        run: |
+          POST_ID=$(docker compose run --rm wp-cli wp post create --post_type=page \
+            --post_title="CI Gutenberg Test" --post_status=publish --post_content="<!-- wp:paragraph --><p>original</p><!-- /wp:paragraph -->" \
+            --porcelain --path=/var/www/html)
+          BATCH_ID=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-batch" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"label":"CI batch","agent_note":"ci"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['batch_id'])")
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-item" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d "{\"batch_id\":$BATCH_ID,\"target_id\":$POST_ID,\"target_type\":\"page\",\"operation\":\"update\",\"block_spec\":[{\"name\":\"core/paragraph\",\"attributes\":{\"content\":\"updated\"}}]}"
+          status=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-enable-finalization" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d "{\"batch_id\":$BATCH_ID}" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+          test "$status" = "ready"
+      - name: Verify Gutenberg unauthenticated request is rejected
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-batches")
+          test "$code" = "401"
       - name: Tear down
         if: always()
         run: docker compose down -v

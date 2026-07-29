@@ -375,4 +375,77 @@ class Ikoeh_Connect_Gutenberg_Store {
             'items' => array_map([self::class, 'shape_item'], $items),
         ];
     }
+
+    public static function cancel_batch($batch_id) {
+        $batch = self::find_batch($batch_id);
+        if (!$batch) {
+            return new WP_Error('ikoeh_connect_batch_not_found', "Gutenberg batch {$batch_id} was not found.", ['status' => 404]);
+        }
+        if (self::STATUS_FINALIZED === self::status($batch->ID)) {
+            return new WP_Error('ikoeh_connect_batch_already_finalized', 'Finalized Gutenberg batches cannot be canceled.', ['status' => 409]);
+        }
+
+        self::set_status($batch->ID, self::STATUS_CANCELED);
+        self::clear_lease($batch->ID);
+        foreach (self::get_items($batch->ID) as $item) {
+            if (self::STATUS_FINALIZED === self::status($item->ID)) {
+                continue;
+            }
+            self::set_status($item->ID, self::STATUS_CANCELED);
+            self::clear_lease($item->ID);
+        }
+
+        return self::shape_batch(self::find_batch($batch->ID));
+    }
+
+    public static function cancel_item($item_id) {
+        $item = self::find_item($item_id);
+        if (!$item) {
+            return new WP_Error('ikoeh_connect_item_not_found', "Gutenberg item {$item_id} was not found.", ['status' => 404]);
+        }
+        if (in_array(self::status($item->ID), self::TERMINAL_STATUSES, true)) {
+            return new WP_Error('ikoeh_connect_item_not_cancelable', 'This Gutenberg pending item is already terminal.', ['status' => 409]);
+        }
+
+        self::set_status($item->ID, self::STATUS_CANCELED);
+        self::clear_lease($item->ID);
+
+        $batch = self::find_batch($item->post_parent);
+        if ($batch && empty(self::get_items($batch->ID, self::NON_TERMINAL_STATUSES))) {
+            self::set_status($batch->ID, self::STATUS_CANCELED);
+            self::clear_lease($batch->ID);
+        }
+
+        return self::shape_item(self::find_item($item->ID));
+    }
+
+    public static function enable_finalization($batch_id) {
+        $batch = self::find_batch($batch_id);
+        if (!$batch) {
+            return new WP_Error('ikoeh_connect_batch_not_found', "Gutenberg batch {$batch_id} was not found.", ['status' => 404]);
+        }
+
+        if (empty(self::get_items($batch->ID))) {
+            return new WP_Error('ikoeh_connect_batch_empty', 'Add at least one item before enabling finalization.', ['status' => 400]);
+        }
+
+        foreach (self::get_items($batch->ID, [self::STATUS_DRAFT]) as $item) {
+            self::set_status($item->ID, self::STATUS_READY);
+        }
+
+        if (!self::atomic_status_transition($batch->ID, [self::STATUS_DRAFT], self::STATUS_READY)) {
+            return new WP_Error('ikoeh_connect_batch_not_draft', 'Only a draft batch can have finalization enabled.', ['status' => 409]);
+        }
+
+        return self::shape_batch(self::find_batch($batch->ID));
+    }
+
+    /** Read a target's current blocks without involving the batch system. */
+    public static function get_target_blocks($target_id) {
+        $target = get_post($target_id);
+        if (!$target) {
+            return new WP_Error('ikoeh_connect_target_not_found', "Target post {$target_id} was not found.", ['status' => 404]);
+        }
+        return ['target_id' => $target_id, 'blocks' => parse_blocks($target->post_content)];
+    }
 }
