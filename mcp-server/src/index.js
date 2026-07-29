@@ -18,6 +18,35 @@ import { registerAdminAccessTools } from "./tools/admin-access.js";
 import { registerGutenbergTools } from "./tools/gutenberg.js";
 import { registerSkillsTools } from "./tools/skills.js";
 
+async function registerSkillPrompts(server, client) {
+  let skills;
+  try {
+    skills = await client.request("GET", "/skills");
+  } catch (err) {
+    // Skills may not exist yet on a fresh site (no skill scope, or the
+    // route isn't reachable for some other reason) -- don't block server
+    // startup over an optional feature.
+    console.error(`Could not fetch skills for prompt registration: ${err.message}`);
+    return;
+  }
+
+  for (const skill of skills) {
+    if (!skill.enable_prompt) {
+      continue;
+    }
+    server.registerPrompt(
+      skill.slug,
+      { title: skill.slug, description: skill.description },
+      async () => {
+        const full = await client.request("GET", "/skill", { params: { slug: skill.slug } });
+        return {
+          messages: [{ role: "user", content: { type: "text", text: full.content } }],
+        };
+      }
+    );
+  }
+}
+
 const siteName = process.argv[2];
 
 if (!siteName) {
@@ -44,6 +73,8 @@ registerPostsTools(server, client);
 registerAdminAccessTools(server, client);
 registerGutenbergTools(server, client);
 registerSkillsTools(server, client);
+
+await registerSkillPrompts(server, client);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
