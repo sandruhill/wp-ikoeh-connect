@@ -191,6 +191,27 @@ jobs:
           test "$DONE" = "finalized"
           content=$(docker compose run --rm wp-cli wp post get "$POST_ID" --field=post_content --path=/var/www/html)
           echo "$content" | grep -q "updated"
+      - name: Verify skill create/list/get/conflict/delete round-trips
+        run: |
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/skill" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"title":"CI Test Skill","description":"a test skill","content":"# Instructions\nDo the thing."}'
+          count=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/skills" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          test "$count" -gt "0"
+          content=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/skill?slug=ci-test-skill" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['content'])")
+          echo "$content" | grep -q "Do the thing"
+          conflict_status=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/skill" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"title":"CI Test Skill","description":"dup","content":"dup"}')
+          test "$conflict_status" = "409"
+          curl -sS -X DELETE "http://localhost:8080/wp-json/ikoeh-connect/v1/skill?slug=ci-test-skill" \
+            -H "Authorization: Bearer $TOKEN"
+      - name: Verify skills unauthenticated request is rejected
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:8080/wp-json/ikoeh-connect/v1/skills")
+          test "$code" = "401"
       - name: Tear down
         if: always()
         run: docker compose down -v
