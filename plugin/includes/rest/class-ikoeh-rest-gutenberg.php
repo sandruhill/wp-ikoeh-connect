@@ -27,7 +27,12 @@ class Ikoeh_Connect_Rest_Gutenberg {
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-batches', [
             'methods' => 'GET',
             'callback' => [__CLASS__, 'list_batches'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('gutenberg'),
+            // Dual-auth: the external Bearer-token agent lists its own batches,
+            // AND the Fila de Blocos page's own JS (a real wp-admin session,
+            // no Bearer token) needs this same route to find READY batches to
+            // claim -- confirmed live that a plain require_scope() 401s the
+            // browser session outright.
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope_or_admin_session('gutenberg'),
         ]);
 
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-item', [

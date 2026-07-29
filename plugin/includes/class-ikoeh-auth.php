@@ -135,6 +135,24 @@ class Ikoeh_Connect_Auth {
         };
     }
 
+    /**
+     * Some routes are legitimately called by both the external Bearer-token
+     * agent AND a logged-in wp-admin browser session (e.g. GET
+     * /gutenberg-batches -- the agent lists batches it created, and the
+     * Fila de Blocos page's own JS needs to find READY batches to claim,
+     * but a browser session never carries a Bearer token). Accept either:
+     * a real WP session with edit_posts, or the normal scope check.
+     */
+    public static function require_scope_or_admin_session($scope = null) {
+        $scope_check = self::require_scope($scope);
+        return function (WP_REST_Request $request) use ($scope_check) {
+            if (current_user_can('edit_posts')) {
+                return true;
+            }
+            return $scope_check($request);
+        };
+    }
+
     public static function setup_rate_limit_ok() {
         $key = 'ikoeh_connect_setup_attempts';
         $attempts = (int) get_transient($key);
