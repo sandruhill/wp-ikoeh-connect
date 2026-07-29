@@ -35,11 +35,13 @@ require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-posts.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-admin-access.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-gutenberg-store.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-gutenberg.php';
+require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-gutenberg-admin.php';
 
 add_action('init', ['Ikoeh_Connect_Auth', 'maybe_migrate']);
 add_action('init', ['Ikoeh_Connect_Gutenberg_Store', 'register_post_type']);
 
 add_action('admin_menu', ['Ikoeh_Connect_Admin', 'register_menu']);
+add_action('admin_menu', ['Ikoeh_Connect_Gutenberg_Admin', 'register_menu']);
 add_action('init', ['Ikoeh_Connect_Admin', 'register_ajax']);
 
 add_action('rest_api_init', function () {
