@@ -920,6 +920,32 @@ Append inside the `Ikoeh_Connect_Gutenberg_Store` class body (after `get_target_
         return ['item' => self::shape_item(self::find_item($item->ID)), 'batch' => $batch ? self::shape_batch(self::find_batch($batch->ID)) : null, 'done' => true];
     }
 
+    /**
+     * Unconditional commit-time failure, distinct from fail_item(): by the
+     * time commit_prepared_items() runs, every item is already PREPARED
+     * with its lease already cleared (complete_item() did that), so
+     * fail_item()'s "must be RUNNING with a valid lease" guard always trips
+     * and silently does nothing -- leaving the batch stuck at RUNNING
+     * forever with no recovery path. This helper mirrors conflict_item()'s
+     * unconditional approach instead.
+     */
+    private static function fail_prepared_item(WP_Post $item, $errors, $message) {
+        self::set_status($item->ID, self::STATUS_FAILED);
+        self::clear_lease($item->ID);
+        update_post_meta($item->ID, self::META_VALIDATION_ERRORS, $errors);
+
+        $batch = self::find_batch($item->post_parent);
+        if ($batch) {
+            self::set_status($batch->ID, self::STATUS_FAILED);
+            self::clear_lease($batch->ID);
+            update_post_meta($batch->ID, self::META_LAST_ERROR, $message);
+        }
+
+        return new WP_Error('ikoeh_connect_gutenberg_prepared_item_failed', $message, [
+            'status' => 500, 'item' => self::shape_item(self::find_item($item->ID)),
+        ]);
+    }
+
     private static function conflict_item(WP_Post $item) {
         self::set_status($item->ID, self::STATUS_CONFLICTED);
         self::clear_lease($item->ID);
@@ -950,7 +976,11 @@ Append inside the `Ikoeh_Connect_Gutenberg_Store` class body (after `get_target_
             return !is_array($v) || true !== ($v['isValid'] ?? false);
         }) !== [];
         if ($has_failures) {
-            return self::fail_item($item->ID, $lease_owner, is_array($validations) ? $validations : [['message' => 'JS validation failed.']], 'JS validation failed; canonical content was not written.');
+            // wp_slash(): $validations is REST-request-derived and reaches update_post_meta()
+            // inside fail_item(), which wp_unslash()es internally -- same recurring bug class
+            // as every other REST-sourced string written in this class.
+            $safe_validations = is_array($validations) ? wp_slash($validations) : [['message' => 'JS validation failed.']];
+            return self::fail_item($item->ID, $lease_owner, $safe_validations, 'JS validation failed; canonical content was not written.');
         }
 
         $target_id = self::meta_int($item->ID, self::META_TARGET_ID);
@@ -1005,7 +1035,7 @@ Append inside the `Ikoeh_Connect_Gutenberg_Store` class body (after `get_target_
             $target = get_post(self::meta_int($item->ID, self::META_TARGET_ID));
             $base_hash = self::meta_string($item->ID, self::META_BASE_CONTENT_HASH);
             if (!$target) {
-                return self::fail_item($item->ID, self::meta_string($item->ID, self::META_LEASE_OWNER), [['message' => 'The target post no longer exists.']], 'Target post missing; live content was left unchanged.');
+                return self::fail_prepared_item($item, [['message' => 'The target post no longer exists.']], 'Target post missing; live content was left unchanged.');
             }
             if ('' !== $base_hash && !hash_equals($base_hash, self::content_hash($target->post_content))) {
                 return self::conflict_item($item);
@@ -1021,13 +1051,22 @@ Append inside the `Ikoeh_Connect_Gutenberg_Store` class body (after `get_target_
             ], true);
 
             if (is_wp_error($updated)) {
+                $restored_ok = true;
                 foreach (array_reverse($written) as $written_item) {
                     $written_target = get_post(self::meta_int($written_item->ID, self::META_TARGET_ID));
                     if ($written_target) {
-                        wp_update_post(['ID' => $written_target->ID, 'post_content' => wp_slash(self::meta_string($written_item->ID, self::META_BASE_CONTENT))], true);
+                        $restore = wp_update_post(['ID' => $written_target->ID, 'post_content' => wp_slash(self::meta_string($written_item->ID, self::META_BASE_CONTENT))], true);
+                        if (is_wp_error($restore)) {
+                            $restored_ok = false;
+                        }
+                    } else {
+                        $restored_ok = false;
                     }
                 }
-                return new WP_Error('ikoeh_connect_gutenberg_write_failed', $updated->get_error_message(), ['status' => 500]);
+                $message = $restored_ok
+                    ? 'WordPress failed to write post_content; live content was left unchanged.'
+                    : 'WordPress failed to write post_content and rollback failed; inspect the affected targets before retrying.';
+                return self::fail_prepared_item($item, [['message' => $updated->get_error_message()]], $message);
             }
 
             $written[] = $item;
@@ -1095,42 +1134,50 @@ Add these methods to the class:
         return current_user_can('edit_posts');
     }
 
-    public static function claim_batch(WP_REST_Request $request) {
-        $result = Ikoeh_Connect_Gutenberg_Store::claim_batch((int) $request->get_param('id'));
+    /**
+     * A returned WP_Error has no header() method, so wrapping it in our own
+     * WP_REST_Response (instead of letting WordPress convert it later) is
+     * the only way to guarantee no_cache_headers() actually runs on error
+     * paths too -- confirmed necessary in production: this state machine's
+     * whole point is to produce 409/404/500 responses under contention,
+     * and any one of those getting cached by LiteSpeed and replayed to a
+     * later legitimate retry would be exactly the bug this helper exists
+     * to prevent.
+     */
+    private static function respond_no_cache($result) {
         if (is_wp_error($result)) {
-            return $result;
+            $data = $result->get_error_data();
+            $status = is_array($data) && isset($data['status']) ? (int) $data['status'] : 500;
+            $response = new WP_REST_Response([
+                'code' => $result->get_error_code(),
+                'message' => $result->get_error_message(),
+                'data' => $data,
+            ], $status);
+        } else {
+            $response = new WP_REST_Response($result, 200);
         }
-        $response = new WP_REST_Response($result, 200);
         Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
         return $response;
+    }
+
+    public static function claim_batch(WP_REST_Request $request) {
+        return self::respond_no_cache(Ikoeh_Connect_Gutenberg_Store::claim_batch((int) $request->get_param('id')));
     }
 
     public static function claim_item(WP_REST_Request $request) {
-        $result = Ikoeh_Connect_Gutenberg_Store::claim_next_item(
+        return self::respond_no_cache(Ikoeh_Connect_Gutenberg_Store::claim_next_item(
             (int) $request->get_param('batch_id'),
             (string) $request->get_param('lease_owner')
-        );
-        if (is_wp_error($result)) {
-            return $result;
-        }
-        $response = new WP_REST_Response($result, 200);
-        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
-        return $response;
+        ));
     }
 
     public static function complete_item(WP_REST_Request $request) {
-        $result = Ikoeh_Connect_Gutenberg_Store::complete_item(
+        return self::respond_no_cache(Ikoeh_Connect_Gutenberg_Store::complete_item(
             (int) $request->get_param('item_id'),
             (string) $request->get_param('lease_owner'),
             (string) $request->get_param('content'),
             $request->get_param('validations')
-        );
-        if (is_wp_error($result)) {
-            return $result;
-        }
-        $response = new WP_REST_Response($result, 200);
-        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
-        return $response;
+        ));
     }
 
     public static function heartbeat() {
