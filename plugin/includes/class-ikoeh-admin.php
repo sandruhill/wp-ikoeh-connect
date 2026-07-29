@@ -18,6 +18,26 @@ class Ikoeh_Connect_Admin {
 
     const NAME_OPTIONS = ['ChatGPT', 'Claude.ai', 'Claude Code', 'Outro'];
 
+    const ACTIVE_WINDOW_SECONDS = 7 * DAY_IN_SECONDS;
+
+    /**
+     * Connection status relative to real API usage, not just "exists and
+     * isn't revoked" -- a connection can be created and never actually
+     * called by anything.
+     */
+    private static function connection_status($connection) {
+        if (empty($connection['last_used_at'])) {
+            return ['dot' => '#8c8f94', 'label' => 'Nunca usada'];
+        }
+
+        $age = time() - (int) $connection['last_used_at'];
+        if ($age <= self::ACTIVE_WINDOW_SECONDS) {
+            return ['dot' => '#00a32a', 'label' => 'Há ' . human_time_diff((int) $connection['last_used_at'], time())];
+        }
+
+        return ['dot' => '#dba617', 'label' => 'Há ' . human_time_diff((int) $connection['last_used_at'], time()) . ' (inativa)'];
+    }
+
     public static function register_menu() {
         add_options_page(
             'WP iKOEH Connect',
@@ -91,7 +111,28 @@ class Ikoeh_Connect_Admin {
 
         $connections = Ikoeh_Connect_Auth::get_connections();
         $has_connections = count($connections) > 0;
+
+        $recently_used_count = 0;
+        foreach ($connections as $connection) {
+            if (!empty($connection['last_used_at']) && (time() - (int) $connection['last_used_at']) <= self::ACTIVE_WINDOW_SECONDS) {
+                $recently_used_count++;
+            }
+        }
+
+        if (!$has_connections) {
+            $banner = ['bg' => '#fcf0f1', 'border' => '#d63638', 'dot' => '#d63638', 'text' => 'Nenhuma conexão criada ainda'];
+        } elseif ($recently_used_count > 0) {
+            $banner = ['bg' => '#edfaef', 'border' => '#00a32a', 'dot' => '#00a32a', 'text' => "{$recently_used_count} de " . count($connections) . ' conexões em uso (últimos 7 dias)'];
+        } else {
+            $banner = ['bg' => '#fcf9e8', 'border' => '#dba617', 'dot' => '#dba617', 'text' => count($connections) . ' conexão(ões) criada(s), nenhuma usada nos últimos 7 dias'];
+        }
         ?>
+        <style>
+            .ikoeh-connect-status-card { background: <?php echo esc_attr($banner['bg']); ?>; border-left: 4px solid <?php echo esc_attr($banner['border']); ?>; border-radius: 2px; padding: 4px 16px 16px; margin: 16px 0; }
+            .ikoeh-connect-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+            .ikoeh-connect-scopes-actions { margin: 4px 0 10px; }
+            .ikoeh-connect-scopes-actions a { margin-right: 12px; font-size: 12px; }
+        </style>
         <div class="wrap">
             <h1>WP iKOEH Connect</h1>
             <p>Conecta este site a IAs (Claude, ChatGPT, etc) para desenvolvimento e otimização assistida.</p>
@@ -109,22 +150,11 @@ class Ikoeh_Connect_Admin {
                 </div>
             <?php endif; ?>
 
-            <div style="
-                background: <?php echo $has_connections ? '#edfaef' : '#fcf0f1'; ?>;
-                border-left: 4px solid <?php echo $has_connections ? '#00a32a' : '#d63638'; ?>;
-                padding: 1px 12px;
-                margin: 16px 0;
-            ">
+            <div class="ikoeh-connect-status-card">
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row">Status</th>
-                        <td>
-                            <?php if ($has_connections) : ?>
-                                <span style="color:#00a32a;">&#9679;</span> <?php echo count($connections); ?> conexão(ões) ativa(s)
-                            <?php else : ?>
-                                <span style="color:#d63638;">&#9679;</span> Nenhuma conexão criada ainda
-                            <?php endif; ?>
-                        </td>
+                        <td><span class="ikoeh-connect-dot" style="background:<?php echo esc_attr($banner['dot']); ?>"></span><?php echo esc_html($banner['text']); ?></td>
                     </tr>
                 </table>
                 <p>
@@ -157,11 +187,8 @@ class Ikoeh_Connect_Admin {
                                     ?>
                                 </td>
                                 <td>
-                                    <?php if (!empty($connection['last_used_at'])) : ?>
-                                        Há <?php echo esc_html(human_time_diff((int) $connection['last_used_at'], time())); ?>
-                                    <?php else : ?>
-                                        Nenhuma chamada ainda
-                                    <?php endif; ?>
+                                    <?php $status = self::connection_status($connection); ?>
+                                    <span class="ikoeh-connect-dot" style="background:<?php echo esc_attr($status['dot']); ?>"></span><?php echo esc_html($status['label']); ?>
                                 </td>
                                 <td>
                                     <form method="post" onsubmit="return confirm('Revogar esta conexão? Quem estiver usando esse token perde acesso imediatamente.');">
@@ -194,9 +221,12 @@ class Ikoeh_Connect_Admin {
                     <tr>
                         <th scope="row">Escopos</th>
                         <td>
+                            <p class="ikoeh-connect-scopes-actions">
+                                <a href="#" id="ikoeh-connect-select-all">Selecionar todos</a><a href="#" id="ikoeh-connect-select-none">Limpar seleção</a>
+                            </p>
                             <?php foreach (self::SCOPE_LABELS as $scope => $label) : ?>
                                 <label style="display:block; margin-bottom:4px;">
-                                    <input type="checkbox" name="ikoeh_connect_scopes[]" value="<?php echo esc_attr($scope); ?>">
+                                    <input type="checkbox" class="ikoeh-connect-scope-checkbox" name="ikoeh_connect_scopes[]" value="<?php echo esc_attr($scope); ?>">
                                     <?php echo esc_html($label); ?>
                                 </label>
                             <?php endforeach; ?>
@@ -217,6 +247,19 @@ class Ikoeh_Connect_Admin {
             }
             nameSelect.addEventListener('change', toggleCustom);
             toggleCustom();
+
+            var scopeCheckboxes = document.querySelectorAll('.ikoeh-connect-scope-checkbox');
+            function setAllScopes(checked) {
+                scopeCheckboxes.forEach(function (checkbox) { checkbox.checked = checked; });
+            }
+            document.getElementById('ikoeh-connect-select-all').addEventListener('click', function (e) {
+                e.preventDefault();
+                setAllScopes(true);
+            });
+            document.getElementById('ikoeh-connect-select-none').addEventListener('click', function (e) {
+                e.preventDefault();
+                setAllScopes(false);
+            });
 
             var testButton = document.getElementById('ikoeh-connect-test-api');
             var testResult = document.getElementById('ikoeh-connect-test-result');
