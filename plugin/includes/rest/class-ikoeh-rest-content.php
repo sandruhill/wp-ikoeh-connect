@@ -69,7 +69,15 @@ class Ikoeh_Connect_Rest_Content {
 
         if (isset($params['meta']) && is_array($params['meta'])) {
             foreach ($params['meta'] as $key => $value) {
-                update_post_meta($id, sanitize_key($key), $value);
+                // update_post_meta() runs wp_unslash() on its way in (WP core
+                // assumes slashed input, mirroring old magic-quotes behavior).
+                // Our $value comes straight from json_decode(), already
+                // unslashed, so without wp_slash() here real backslashes in
+                // the value (e.g. \n or \" inside a JSON string stored as
+                // meta, like Elementor's _elementor_data) get silently
+                // stripped, corrupting the stored value.
+                $slashed_value = is_string($value) ? wp_slash($value) : $value;
+                update_post_meta($id, sanitize_key($key), $slashed_value);
             }
         }
 

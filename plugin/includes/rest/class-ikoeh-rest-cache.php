@@ -19,6 +19,17 @@ class Ikoeh_Connect_Rest_Cache {
 
     public static function handle() {
         $flushed = wp_cache_flush();
+
+        // wp_cache_flush() only clears WP's runtime/object cache. It does
+        // NOT touch LiteSpeed's page cache (the HTML output cache served to
+        // anonymous visitors), so without this, edited content kept being
+        // served stale after a "purge" that silently did nothing for it.
+        if (has_action('litespeed_purge_all')) {
+            do_action('litespeed_purge_all');
+        } elseif (class_exists('\LiteSpeed\Purge') && method_exists('\LiteSpeed\Purge', 'purge_all')) {
+            \LiteSpeed\Purge::purge_all();
+        }
+
         return new WP_REST_Response(['flushed' => (bool) $flushed], 200);
     }
 }
