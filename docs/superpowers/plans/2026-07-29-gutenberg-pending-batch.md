@@ -1321,11 +1321,17 @@ class Ikoeh_Connect_Gutenberg_Admin {
         wp_enqueue_script('wp-blocks');
         wp_enqueue_script('wp-block-library');
         wp_enqueue_script('wp-element');
+        $queue_js_path = IKOEH_CONNECT_DIR . 'assets/gutenberg-queue.js';
         wp_enqueue_script(
             'ikoeh-connect-gutenberg-queue',
             IKOEH_CONNECT_URL . 'assets/gutenberg-queue.js',
             ['wp-blocks', 'wp-block-library', 'wp-element'],
-            IKOEH_CONNECT_VERSION,
+            // filemtime(), not the static IKOEH_CONNECT_VERSION: that constant
+            // never changes between self-updates, so a browser that already
+            // cached this script keeps serving the stale copy across every
+            // future fix -- confirmed live during testing (a real bug fix
+            // required a manual hard-reload to actually take effect).
+            file_exists($queue_js_path) ? (string) filemtime($queue_js_path) : IKOEH_CONNECT_VERSION,
             true
         );
         wp_localize_script('ikoeh-connect-gutenberg-queue', 'ikoehGutenbergQueue', [
