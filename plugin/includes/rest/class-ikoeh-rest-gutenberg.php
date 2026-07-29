@@ -112,7 +112,14 @@ class Ikoeh_Connect_Rest_Gutenberg {
         $status = $request->get_param('status');
         $statuses = $status ? [sanitize_key($status)] : null;
         $batches = Ikoeh_Connect_Gutenberg_Store::get_batches($statuses);
-        return new WP_REST_Response(array_map(['Ikoeh_Connect_Gutenberg_Store', 'shape_batch'], $batches), 200);
+        $response = new WP_REST_Response(array_map(['Ikoeh_Connect_Gutenberg_Store', 'shape_batch'], $batches), 200);
+        // Confirmed live: the Fila de Blocos poller re-attempted claiming an
+        // already-finalized batch, consistent with LiteSpeed Cache replaying a
+        // stale ?status=ready response -- this route reports live, constantly
+        // changing state (which batches are currently claimable) and must
+        // never be cached, same reasoning as every other finalizer-flow route.
+        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
+        return $response;
     }
 
     public static function get_batch(WP_REST_Request $request) {
