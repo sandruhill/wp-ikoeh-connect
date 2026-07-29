@@ -347,6 +347,19 @@ class Ikoeh_Connect_Gutenberg_Store {
     }
 
     public static function create_item($batch_id, $target_id, $target_type, $operation, array $blocks) {
+        // Validate the batch itself before touching anything else: an item
+        // with post_parent pointing at a nonexistent post, a post that
+        // isn't a KIND_BATCH, or a batch already terminal (finalized/
+        // canceled/stale) would otherwise be silently accepted.
+        $batch = self::find_batch($batch_id);
+        if (!$batch) {
+            return new WP_Error('ikoeh_connect_batch_not_found', "Gutenberg batch {$batch_id} was not found.", ['status' => 404]);
+        }
+        $batch_status = self::status($batch->ID);
+        if (in_array($batch_status, self::TERMINAL_STATUSES, true)) {
+            return new WP_Error('ikoeh_connect_batch_not_open', "Cannot add an item to a batch that is already {$batch_status}.", ['status' => 409]);
+        }
+
         $target = get_post($target_id);
         if (!$target) {
             return new WP_Error('ikoeh_connect_target_not_found', "Target post {$target_id} was not found.", ['status' => 404]);
@@ -546,12 +559,16 @@ Add to `Ikoeh_Connect_Gutenberg_Store` (append inside the class body, after `sha
             return new WP_Error('ikoeh_connect_batch_empty', 'Add at least one item before enabling finalization.', ['status' => 400]);
         }
 
-        foreach (self::get_items($batch->ID, [self::STATUS_DRAFT]) as $item) {
-            self::set_status($item->ID, self::STATUS_READY);
-        }
-
+        // Gate the batch transition FIRST: flipping items to READY before
+        // confirming the batch itself can go DRAFT->READY would mutate items
+        // on a call that ultimately returns an error (e.g. the batch was
+        // already READY/RUNNING/etc from a raced or repeated call).
         if (!self::atomic_status_transition($batch->ID, [self::STATUS_DRAFT], self::STATUS_READY)) {
             return new WP_Error('ikoeh_connect_batch_not_draft', 'Only a draft batch can have finalization enabled.', ['status' => 409]);
+        }
+
+        foreach (self::get_items($batch->ID, [self::STATUS_DRAFT]) as $item) {
+            self::set_status($item->ID, self::STATUS_READY);
         }
 
         return self::shape_batch(self::find_batch($batch->ID));
@@ -801,11 +818,11 @@ git commit -m "feat: add agent-facing Gutenberg pending-batch REST routes"
 
 ---
 
-### Task 3: Finalizer routes (claim, complete, heartbeat, runtime status) and commit logic
+### Task 3: Finalizer routes (claim, complete, heartbeat) and commit logic
 
 **Files:**
-- Modify: `plugin/includes/class-ikoeh-gutenberg-store.php` (add claim/complete/commit/runtime methods)
-- Modify: `plugin/includes/rest/class-ikoeh-rest-gutenberg.php` (add the 4 internal routes)
+- Modify: `plugin/includes/class-ikoeh-gutenberg-store.php` (add claim/complete/commit methods)
+- Modify: `plugin/includes/rest/class-ikoeh-rest-gutenberg.php` (add the internal routes)
 - Modify: `.github/workflows/ci.yml` (append integration steps)
 
 **Interfaces:**
@@ -815,8 +832,8 @@ git commit -m "feat: add agent-facing Gutenberg pending-batch REST routes"
   - `Ikoeh_Connect_Gutenberg_Store::claim_next_item(int $batch_id, string $lease_owner): array|WP_Error` (`['done' => bool, 'item' => ?array, 'batch' => array]`)
   - `Ikoeh_Connect_Gutenberg_Store::complete_item(int $item_id, string $lease_owner, string $content, mixed $validations): array|WP_Error`
   - `Ikoeh_Connect_Gutenberg_Store::heartbeat(): void`
-  - `Ikoeh_Connect_Gutenberg_Store::runtime_status(int $batch_id): array` (`['online' => bool, 'can_finalize' => bool]`)
-  - REST routes `POST /gutenberg-claim-batch`, `POST /gutenberg-claim-item`, `POST /gutenberg-complete-item`, `POST /gutenberg-heartbeat`, `GET /gutenberg-runtime` -- all gated by `current_user_can('edit_posts')` (checked inline in each callback, not via `Ikoeh_Connect_Auth::require_scope`), for Task 4's admin-page JS to call. These are NOT added to the MCP server (Task 6 skips them, per the spec).
+  - REST routes `POST /gutenberg-claim-batch`, `POST /gutenberg-claim-item`, `POST /gutenberg-complete-item`, `POST /gutenberg-heartbeat` -- all gated by `current_user_can('edit_posts')` (checked inline in each callback, not via `Ikoeh_Connect_Auth::require_scope`), for Task 4's admin-page JS to call. These are NOT added to the MCP server (Task 6 skips them, per the spec).
+  - Note (post-review): a `GET /gutenberg-runtime` route + `runtime()` callback + `runtime_status()` store method were originally planned here but removed before ship -- nothing ever called the route (not the finalizer JS, not any MCP tool), and `runtime_status()`'s `current_user_can('edit_post', $target_id)` check is always false under Bearer-token auth (no logged-in WP user in that request context), so `can_finalize` would have been permanently false even if something had called it. `heartbeat()`/`HEARTBEAT_TRANSIENT` are kept -- the finalizer JS's own heartbeat call still uses those.
 
 - [ ] **Step 1: Add claim/complete/commit/heartbeat methods to the store**
 
@@ -828,26 +845,6 @@ Append inside the `Ikoeh_Connect_Gutenberg_Store` class body (after `get_target_
 
     public static function heartbeat() {
         set_transient(self::HEARTBEAT_TRANSIENT, time(), self::HEARTBEAT_STALE_SECONDS);
-    }
-
-    public static function runtime_status($batch_id) {
-        $last_beat = get_transient(self::HEARTBEAT_TRANSIENT);
-        $online = is_int($last_beat) && (time() - $last_beat) <= self::HEARTBEAT_STALE_SECONDS;
-
-        $batch = self::find_batch($batch_id);
-        $can_finalize = false;
-        if ($online && $batch) {
-            $can_finalize = true;
-            foreach (self::get_items($batch->ID) as $item) {
-                $target_id = self::meta_int($item->ID, self::META_TARGET_ID);
-                if ($target_id <= 0 || !current_user_can('edit_post', $target_id)) {
-                    $can_finalize = false;
-                    break;
-                }
-            }
-        }
-
-        return ['online' => $online, 'can_finalize' => $can_finalize];
     }
 
     private static function release_expired_lease_if_any($batch) {
@@ -1146,12 +1143,6 @@ In `plugin/includes/rest/class-ikoeh-rest-gutenberg.php`, add to `register_route
             'callback' => [__CLASS__, 'heartbeat'],
             'permission_callback' => [__CLASS__, 'require_admin_session'],
         ]);
-
-        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-runtime', [
-            'methods' => 'GET',
-            'callback' => [__CLASS__, 'runtime'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('gutenberg'),
-        ]);
 ```
 
 Add these methods to the class:
@@ -1215,12 +1206,6 @@ Add these methods to the class:
     public static function heartbeat() {
         Ikoeh_Connect_Gutenberg_Store::heartbeat();
         $response = new WP_REST_Response(['ok' => true], 200);
-        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
-        return $response;
-    }
-
-    public static function runtime(WP_REST_Request $request) {
-        $response = new WP_REST_Response(Ikoeh_Connect_Gutenberg_Store::runtime_status((int) $request->get_param('id')), 200);
         Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
         return $response;
     }
@@ -1536,6 +1521,7 @@ Append inside the class body:
 
 ```php
     public static function cleanup() {
+        self::release_expired_running_leases();
         self::mark_stale_drafts();
         self::mark_old_failed_batches_stale();
 
@@ -1550,6 +1536,23 @@ Append inside the class body:
                 wp_delete_post($item->ID, true);
             }
             wp_delete_post($batch->ID, true);
+        }
+    }
+
+    /**
+     * A batch stuck in RUNNING (e.g. the operator closed the Fila de Blocos
+     * tab mid-processing) is never listed by the finalizer poller again
+     * (it only lists READY batches) and isn't touched by mark_stale_drafts()
+     * or mark_old_failed_batches_stale() (RUNNING is neither DRAFT nor
+     * FAILED) -- so without this it stays RUNNING forever. Reuse the same
+     * expired-lease check claim_batch() already runs on every RUNNING
+     * batch here too, so the daily cron demotes it to FAILED within at
+     * most 24h, after which it flows into the existing FAILED/stale/
+     * retention cleanup below.
+     */
+    private static function release_expired_running_leases() {
+        foreach (self::get_batches([self::STATUS_RUNNING], -1) as $batch) {
+            self::release_expired_lease_if_any($batch);
         }
     }
 
@@ -1587,14 +1590,19 @@ Append inside the class body:
             wp_schedule_event(time() + 3600, 'daily', 'ikoeh_gb_cleanup');
         }
     }
+
+    public static function unschedule_cleanup() {
+        wp_clear_scheduled_hook('ikoeh_gb_cleanup');
+    }
 ```
 
-- [ ] **Step 2: Schedule the cron hook**
+- [ ] **Step 2: Schedule the cron hook, and unschedule it on deactivation**
 
 In `plugin/wp-ikoeh-connect.php`, add:
 ```php
 add_action('init', ['Ikoeh_Connect_Gutenberg_Store', 'schedule_cleanup']);
 add_action('ikoeh_gb_cleanup', ['Ikoeh_Connect_Gutenberg_Store', 'cleanup']);
+register_deactivation_hook(__FILE__, ['Ikoeh_Connect_Gutenberg_Store', 'unschedule_cleanup']);
 ```
 
 - [ ] **Step 3: Lint**
@@ -1628,7 +1636,7 @@ git commit -m "feat: add daily cleanup cron for stale Gutenberg pending changes"
 - Modify: `mcp-server/src/index.js`
 
 **Interfaces:**
-- Consumes: REST routes from Task 2 (`/gutenberg-batch`, `/gutenberg-batches`, `/gutenberg-item`, `/gutenberg-enable-finalization`, `/gutenberg-content`). Does NOT wrap the Task 3 internal routes (claim/complete/heartbeat/runtime) -- those are browser-only per the spec.
+- Consumes: REST routes from Task 2 (`/gutenberg-batch`, `/gutenberg-batches`, `/gutenberg-item`, `/gutenberg-enable-finalization`, `/gutenberg-content`). Does NOT wrap the Task 3 internal routes (claim/complete/heartbeat) -- those are browser-only per the spec.
 - Produces: `registerGutenbergTools(server, client)`, called from `index.js` alongside the other `register*Tools` calls.
 
 - [ ] **Step 1: Write the MCP tool file**

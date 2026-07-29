@@ -287,6 +287,15 @@ class Ikoeh_Connect_Gutenberg_Store {
     }
 
     public static function create_item($batch_id, $target_id, $target_type, $operation, array $blocks) {
+        $batch = self::find_batch($batch_id);
+        if (!$batch) {
+            return new WP_Error('ikoeh_connect_batch_not_found', "Gutenberg batch {$batch_id} was not found.", ['status' => 404]);
+        }
+        $batch_status = self::status($batch->ID);
+        if (in_array($batch_status, self::TERMINAL_STATUSES, true)) {
+            return new WP_Error('ikoeh_connect_batch_not_open', "Cannot add an item to a batch that is already {$batch_status}.", ['status' => 409]);
+        }
+
         $target = get_post($target_id);
         if (!$target) {
             return new WP_Error('ikoeh_connect_target_not_found', "Target post {$target_id} was not found.", ['status' => 404]);
@@ -429,12 +438,12 @@ class Ikoeh_Connect_Gutenberg_Store {
             return new WP_Error('ikoeh_connect_batch_empty', 'Add at least one item before enabling finalization.', ['status' => 400]);
         }
 
-        foreach (self::get_items($batch->ID, [self::STATUS_DRAFT]) as $item) {
-            self::set_status($item->ID, self::STATUS_READY);
-        }
-
         if (!self::atomic_status_transition($batch->ID, [self::STATUS_DRAFT], self::STATUS_READY)) {
             return new WP_Error('ikoeh_connect_batch_not_draft', 'Only a draft batch can have finalization enabled.', ['status' => 409]);
+        }
+
+        foreach (self::get_items($batch->ID, [self::STATUS_DRAFT]) as $item) {
+            self::set_status($item->ID, self::STATUS_READY);
         }
 
         return self::shape_batch(self::find_batch($batch->ID));
@@ -454,26 +463,6 @@ class Ikoeh_Connect_Gutenberg_Store {
 
     public static function heartbeat() {
         set_transient(self::HEARTBEAT_TRANSIENT, time(), self::HEARTBEAT_STALE_SECONDS);
-    }
-
-    public static function runtime_status($batch_id) {
-        $last_beat = get_transient(self::HEARTBEAT_TRANSIENT);
-        $online = is_int($last_beat) && (time() - $last_beat) <= self::HEARTBEAT_STALE_SECONDS;
-
-        $batch = self::find_batch($batch_id);
-        $can_finalize = false;
-        if ($online && $batch) {
-            $can_finalize = true;
-            foreach (self::get_items($batch->ID) as $item) {
-                $target_id = self::meta_int($item->ID, self::META_TARGET_ID);
-                if ($target_id <= 0 || !current_user_can('edit_post', $target_id)) {
-                    $can_finalize = false;
-                    break;
-                }
-            }
-        }
-
-        return ['online' => $online, 'can_finalize' => $can_finalize];
     }
 
     private static function release_expired_lease_if_any($batch) {
@@ -740,6 +729,7 @@ class Ikoeh_Connect_Gutenberg_Store {
     }
 
     public static function cleanup() {
+        self::release_expired_running_leases();
         self::mark_stale_drafts();
         self::mark_old_failed_batches_stale();
 
@@ -754,6 +744,23 @@ class Ikoeh_Connect_Gutenberg_Store {
                 wp_delete_post($item->ID, true);
             }
             wp_delete_post($batch->ID, true);
+        }
+    }
+
+    /**
+     * A batch stuck in RUNNING (e.g. the operator closed the Fila de Blocos
+     * tab mid-processing) is never listed by the finalizer poller again
+     * (it only lists READY batches) and isn't touched by mark_stale_drafts()
+     * or mark_old_failed_batches_stale() (RUNNING is neither DRAFT nor
+     * FAILED) -- so without this it stays RUNNING forever. Reuse the same
+     * expired-lease check claim_batch() already runs on every RUNNING
+     * batch here too, so the daily cron demotes it to FAILED within at
+     * most 24h, after which it flows into the existing FAILED/stale/
+     * retention cleanup below.
+     */
+    private static function release_expired_running_leases() {
+        foreach (self::get_batches([self::STATUS_RUNNING], -1) as $batch) {
+            self::release_expired_lease_if_any($batch);
         }
     }
 
@@ -790,5 +797,9 @@ class Ikoeh_Connect_Gutenberg_Store {
         if (false === wp_next_scheduled('ikoeh_gb_cleanup')) {
             wp_schedule_event(time() + 3600, 'daily', 'ikoeh_gb_cleanup');
         }
+    }
+
+    public static function unschedule_cleanup() {
+        wp_clear_scheduled_hook('ikoeh_gb_cleanup');
     }
 }

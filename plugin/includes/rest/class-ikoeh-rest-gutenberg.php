@@ -83,12 +83,6 @@ class Ikoeh_Connect_Rest_Gutenberg {
             'callback' => [__CLASS__, 'heartbeat'],
             'permission_callback' => [__CLASS__, 'require_admin_session'],
         ]);
-
-        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-runtime', [
-            'methods' => 'GET',
-            'callback' => [__CLASS__, 'runtime'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('gutenberg'),
-        ]);
     }
 
     private static function respond($result) {
@@ -184,11 +178,12 @@ class Ikoeh_Connect_Rest_Gutenberg {
      */
     private static function respond_no_cache($result) {
         if (is_wp_error($result)) {
-            $status = $result->get_error_data()['status'] ?? 500;
+            $data = $result->get_error_data();
+            $status = is_array($data) && isset($data['status']) ? (int) $data['status'] : 500;
             $response = new WP_REST_Response([
                 'code' => $result->get_error_code(),
                 'message' => $result->get_error_message(),
-                'data' => $result->get_error_data(),
+                'data' => $data,
             ], $status);
         } else {
             $response = new WP_REST_Response($result, 200);
@@ -220,12 +215,6 @@ class Ikoeh_Connect_Rest_Gutenberg {
     public static function heartbeat() {
         Ikoeh_Connect_Gutenberg_Store::heartbeat();
         $response = new WP_REST_Response(['ok' => true], 200);
-        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
-        return $response;
-    }
-
-    public static function runtime(WP_REST_Request $request) {
-        $response = new WP_REST_Response(Ikoeh_Connect_Gutenberg_Store::runtime_status((int) $request->get_param('id')), 200);
         Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
         return $response;
     }
