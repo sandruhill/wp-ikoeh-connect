@@ -15,6 +15,7 @@ import { registerThemeTools } from "./tools/theme.js";
 import { registerMediaTools } from "./tools/media.js";
 import { registerPostsTools } from "./tools/posts.js";
 import { registerAdminAccessTools } from "./tools/admin-access.js";
+import { registerGutenbergTools } from "./tools/gutenberg.js";
 
 const siteName = process.argv[2];
 
@@ -40,6 +41,7 @@ registerThemeTools(server, client);
 registerMediaTools(server, client);
 registerPostsTools(server, client);
 registerAdminAccessTools(server, client);
+registerGutenbergTools(server, client);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
