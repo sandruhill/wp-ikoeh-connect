@@ -738,4 +738,57 @@ class Ikoeh_Connect_Gutenberg_Store {
 
         return ['done' => true, 'batch' => self::shape_batch(self::find_batch($batch->ID))];
     }
+
+    public static function cleanup() {
+        self::mark_stale_drafts();
+        self::mark_old_failed_batches_stale();
+
+        $cutoff = time() - self::RETENTION_SECONDS;
+        foreach (self::get_batches(self::TERMINAL_STATUSES, -1) as $batch) {
+            $updated_at = self::meta_string($batch->ID, self::META_STATUS_UPDATED_AT);
+            $updated_ts = $updated_at ? strtotime($updated_at . ' UTC') : 0;
+            if ($updated_ts && $updated_ts > $cutoff) {
+                continue;
+            }
+            foreach (self::get_items($batch->ID) as $item) {
+                wp_delete_post($item->ID, true);
+            }
+            wp_delete_post($batch->ID, true);
+        }
+    }
+
+    private static function mark_stale_drafts() {
+        $cutoff = time() - self::DRAFT_STALE_SECONDS;
+        foreach (self::get_batches([self::STATUS_DRAFT], -1) as $batch) {
+            $created = strtotime($batch->post_date_gmt . ' UTC');
+            if ($created > $cutoff) {
+                continue;
+            }
+            self::set_status($batch->ID, self::STATUS_STALE);
+            foreach (self::get_items($batch->ID, [self::STATUS_DRAFT]) as $item) {
+                self::set_status($item->ID, self::STATUS_STALE);
+            }
+        }
+    }
+
+    private static function mark_old_failed_batches_stale() {
+        $cutoff = time() - self::RETENTION_SECONDS;
+        foreach (self::get_batches([self::STATUS_FAILED], -1) as $batch) {
+            $updated_at = self::meta_string($batch->ID, self::META_STATUS_UPDATED_AT);
+            $updated_ts = $updated_at ? strtotime($updated_at . ' UTC') : 0;
+            if ($updated_ts && $updated_ts > $cutoff) {
+                continue;
+            }
+            self::set_status($batch->ID, self::STATUS_STALE);
+            foreach (self::get_items($batch->ID, self::NON_TERMINAL_STATUSES) as $item) {
+                self::set_status($item->ID, self::STATUS_STALE);
+            }
+        }
+    }
+
+    public static function schedule_cleanup() {
+        if (false === wp_next_scheduled('ikoeh_gb_cleanup')) {
+            wp_schedule_event(time() + 3600, 'daily', 'ikoeh_gb_cleanup');
+        }
+    }
 }

@@ -39,6 +39,8 @@ require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-gutenberg-admin.php';
 
 add_action('init', ['Ikoeh_Connect_Auth', 'maybe_migrate']);
 add_action('init', ['Ikoeh_Connect_Gutenberg_Store', 'register_post_type']);
+add_action('init', ['Ikoeh_Connect_Gutenberg_Store', 'schedule_cleanup']);
+add_action('ikoeh_gb_cleanup', ['Ikoeh_Connect_Gutenberg_Store', 'cleanup']);
 
 add_action('admin_menu', ['Ikoeh_Connect_Admin', 'register_menu']);
 add_action('admin_menu', ['Ikoeh_Connect_Gutenberg_Admin', 'register_menu']);
