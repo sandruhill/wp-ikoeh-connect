@@ -13,6 +13,7 @@ class Ikoeh_Connect_Admin {
         'elementor'  => 'Elementor',
         'theme'      => 'Temas',
         'media'      => 'Mídia',
+        'admin_access' => 'Acesso admin temporário',
     ];
 
     const NAME_OPTIONS = ['ChatGPT', 'Claude.ai', 'Claude Code', 'Outro'];
