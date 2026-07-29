@@ -41,6 +41,12 @@ Novo arquivo `mcp-server/src/tools/admin-access.js`, mesmo padrao de `cache.js` 
 
 Mesmo modelo de token por conexao com escopos. Scope `admin_access` e o mais sensivel ate agora (equivale a login como administrador) -- mas o design de 3 etapas com nonces de uso unico e janelas curtas (max 600s pro token de criacao, max 60s pra URL de login) limita bem o dano de um vazamento parcial (ex: um proxy de log capturando a URL de login ainda teria so 60s de janela, e so funciona uma vez).
 
+## Bug real encontrado e corrigido em producao (2026-07-29)
+
+Headers de resposta (`Cache-Control`, `X-LiteSpeed-Cache-Control`) nao foram suficientes: confirmado em producao que uma segunda chamada pra mesma `login_url` voltava com `x-litespeed-cache: hit` -- o LiteSpeed estava reproduzindo o 302 cacheado em vez de rodar a checagem de uso unico, quebrando a garantia de "so pode ser usado uma vez" completamente (o handler PHP nem chegava a executar na segunda chamada). O plugin LiteSpeed Cache toma a propria decisao de cache independente dos headers de resposta do PHP. Corrigido chamando `do_action('litespeed_control_set_nocache', 'motivo')` no inicio do handler -- esse e o hook documentado do proprio plugin LiteSpeed Cache pra marcar um request como nao cacheavel. Validado: reusar a mesma `login_url` agora retorna 401 de verdade em vez de um 302 cacheado.
+
+**Vale lembrar pra qualquer endpoint publico futuro que precise ser genuinamente nao cacheavel neste host** (ex: futuras rotas do Gutenberg pending-batch): headers de Cache-Control sozinhos nao bastam, precisa do `litespeed_control_set_nocache`.
+
 ## Testes
 
 Seguir padrao Docker Compose + CI existente. Teste de integracao minimo: criar conexao com scope `admin_access`, `POST /admin-access`, `POST /admin-access-exchange` com o token/nonce recebidos, `GET /admin-access-login?nonce=` e confirmar redirect 302 + cookie de auth setado. Confirmar tambem que reusar o mesmo token ou nonce uma segunda vez retorna erro (uso unico).
