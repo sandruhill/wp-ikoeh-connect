@@ -5,6 +5,16 @@
     var restUrl = window.ikoehGutenbergQueue.restUrl;
     var nonce = window.ikoehGutenbergQueue.nonce;
 
+    // Enqueuing wp-block-library only loads the block DEFINITIONS module --
+    // it does not register any block type on its own outside the real post
+    // editor (confirmed live: wp.blocks.getBlockType('core/paragraph') was
+    // false and wp.blocks.getBlockTypes() was empty until this ran).
+    // registerCoreBlocks() is the same call WordPress's own editor bootstrap
+    // makes; without it every block_spec fails validation as "unknown".
+    if (window.wp && window.wp.blockLibrary && window.wp.blockLibrary.registerCoreBlocks) {
+        window.wp.blockLibrary.registerCoreBlocks();
+    }
+
     function apiFetch(path, options) {
         options = options || {};
         options.headers = Object.assign({ "X-WP-Nonce": nonce, "Content-Type": "application/json" }, options.headers || {});
