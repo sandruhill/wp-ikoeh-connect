@@ -448,4 +448,259 @@ class Ikoeh_Connect_Gutenberg_Store {
         }
         return ['target_id' => $target_id, 'blocks' => parse_blocks($target->post_content)];
     }
+
+    const HEARTBEAT_TRANSIENT = 'ikoeh_gb_finalizer_heartbeat';
+    const HEARTBEAT_STALE_SECONDS = 15;
+
+    public static function heartbeat() {
+        set_transient(self::HEARTBEAT_TRANSIENT, time(), self::HEARTBEAT_STALE_SECONDS);
+    }
+
+    public static function runtime_status($batch_id) {
+        $last_beat = get_transient(self::HEARTBEAT_TRANSIENT);
+        $online = is_int($last_beat) && (time() - $last_beat) <= self::HEARTBEAT_STALE_SECONDS;
+
+        $batch = self::find_batch($batch_id);
+        $can_finalize = false;
+        if ($online && $batch) {
+            $can_finalize = true;
+            foreach (self::get_items($batch->ID) as $item) {
+                $target_id = self::meta_int($item->ID, self::META_TARGET_ID);
+                if ($target_id <= 0 || !current_user_can('edit_post', $target_id)) {
+                    $can_finalize = false;
+                    break;
+                }
+            }
+        }
+
+        return ['online' => $online, 'can_finalize' => $can_finalize];
+    }
+
+    private static function release_expired_lease_if_any($batch) {
+        if (self::STATUS_RUNNING === self::status($batch->ID) && !self::lease_is_valid($batch->ID, self::meta_string($batch->ID, self::META_LEASE_OWNER))) {
+            self::set_status($batch->ID, self::STATUS_FAILED);
+            update_post_meta($batch->ID, self::META_LAST_ERROR, 'A previous Fila de Blocos tab stopped before renewing its lease.');
+            self::clear_lease($batch->ID);
+        }
+        foreach (self::get_items($batch->ID, [self::STATUS_RUNNING]) as $item) {
+            if (self::lease_is_valid($item->ID, self::meta_string($item->ID, self::META_LEASE_OWNER))) {
+                continue;
+            }
+            self::set_status($item->ID, self::STATUS_FAILED);
+            update_post_meta($item->ID, self::META_VALIDATION_ERRORS, [['message' => 'A previous Fila de Blocos tab stopped before completing this item.']]);
+            self::clear_lease($item->ID);
+        }
+    }
+
+    public static function claim_batch($batch_id) {
+        $batch = self::find_batch($batch_id);
+        if (!$batch) {
+            return new WP_Error('ikoeh_connect_batch_not_found', "Gutenberg batch {$batch_id} was not found.", ['status' => 404]);
+        }
+
+        self::release_expired_lease_if_any($batch);
+        $batch = self::find_batch($batch_id);
+        $current_status = self::status($batch->ID);
+
+        if (self::STATUS_DRAFT === $current_status) {
+            return new WP_Error('ikoeh_connect_batch_not_ready', 'Draft batches cannot be finalized until gutenberg-enable-finalization is called.', ['status' => 409]);
+        }
+        if (!in_array($current_status, [self::STATUS_READY, self::STATUS_FAILED], true)) {
+            return new WP_Error('ikoeh_connect_batch_not_claimable', "Batch {$batch->ID} is {$current_status} and cannot be claimed.", ['status' => 409]);
+        }
+
+        $lease_owner = wp_generate_password(24, false);
+        if (!self::atomic_status_transition($batch->ID, [self::STATUS_READY, self::STATUS_FAILED], self::STATUS_RUNNING)) {
+            return new WP_Error('ikoeh_connect_batch_claim_raced', 'Another Fila de Blocos tab claimed this batch first.', ['status' => 409]);
+        }
+
+        self::set_lease($batch->ID, $lease_owner);
+        update_post_meta($batch->ID, self::META_LAST_ERROR, '');
+        foreach (self::get_items($batch->ID, [self::STATUS_FAILED, self::STATUS_CONFLICTED]) as $item) {
+            self::set_status($item->ID, self::STATUS_READY);
+            update_post_meta($item->ID, self::META_VALIDATION_ERRORS, []);
+            self::clear_lease($item->ID);
+        }
+
+        return ['lease_owner' => $lease_owner, 'batch' => self::shape_batch(self::find_batch($batch->ID))];
+    }
+
+    public static function claim_next_item($batch_id, $lease_owner) {
+        $batch = self::find_batch($batch_id);
+        if (!$batch) {
+            return new WP_Error('ikoeh_connect_batch_not_found', "Gutenberg batch {$batch_id} was not found.", ['status' => 404]);
+        }
+        if (self::STATUS_RUNNING !== self::status($batch->ID) || !self::lease_is_valid($batch->ID, $lease_owner)) {
+            return new WP_Error('ikoeh_connect_batch_lease_invalid', 'The batch finalization lease is no longer active.', ['status' => 409]);
+        }
+
+        self::set_lease($batch->ID, $lease_owner);
+        $ready_items = self::get_items($batch->ID, [self::STATUS_READY]);
+        if (empty($ready_items)) {
+            return self::finish_batch_if_complete($batch);
+        }
+
+        $item = $ready_items[0];
+        if (!self::atomic_status_transition($item->ID, [self::STATUS_READY], self::STATUS_RUNNING)) {
+            return new WP_Error('ikoeh_connect_item_claim_raced', 'Another Fila de Blocos request claimed this item first.', ['status' => 409]);
+        }
+        self::set_lease($item->ID, $lease_owner);
+
+        $item = self::find_item($item->ID);
+        $blocks = self::item_blocks($item);
+        if (is_wp_error($blocks)) {
+            return self::fail_item($item->ID, $lease_owner, [['message' => $blocks->get_error_message()]]);
+        }
+
+        return ['done' => false, 'item' => self::shape_item($item) + ['block_spec' => $blocks], 'batch' => self::shape_batch($batch)];
+    }
+
+    private static function fail_item($item_id, $lease_owner, $errors, $message = 'One or more Gutenberg items failed validation.') {
+        $item = self::find_item($item_id);
+        if (!$item) {
+            return new WP_Error('ikoeh_connect_item_not_found', "Gutenberg item {$item_id} was not found.", ['status' => 404]);
+        }
+        if (self::STATUS_RUNNING !== self::status($item->ID) || !self::lease_is_valid($item->ID, $lease_owner)) {
+            return new WP_Error('ikoeh_connect_item_lease_invalid', 'The item finalization lease is no longer active.', ['status' => 409]);
+        }
+
+        self::set_status($item->ID, self::STATUS_FAILED);
+        self::clear_lease($item->ID);
+        update_post_meta($item->ID, self::META_VALIDATION_ERRORS, $errors);
+
+        $batch = self::find_batch($item->post_parent);
+        if ($batch) {
+            self::set_status($batch->ID, self::STATUS_FAILED);
+            self::clear_lease($batch->ID);
+            update_post_meta($batch->ID, self::META_LAST_ERROR, $message);
+        }
+
+        return ['item' => self::shape_item(self::find_item($item->ID)), 'batch' => $batch ? self::shape_batch(self::find_batch($batch->ID)) : null, 'done' => true];
+    }
+
+    private static function conflict_item(WP_Post $item) {
+        self::set_status($item->ID, self::STATUS_CONFLICTED);
+        self::clear_lease($item->ID);
+        update_post_meta($item->ID, self::META_VALIDATION_ERRORS, [['message' => 'The target content changed after this item was queued.']]);
+
+        $batch = self::find_batch($item->post_parent);
+        if ($batch) {
+            self::set_status($batch->ID, self::STATUS_FAILED);
+            self::clear_lease($batch->ID);
+            update_post_meta($batch->ID, self::META_LAST_ERROR, 'At least one target changed after it was queued; live content was left unchanged.');
+        }
+
+        return new WP_Error('ikoeh_connect_target_changed', 'The target content changed after this item was queued. Live content was left unchanged.', [
+            'status' => 409, 'item' => self::shape_item(self::find_item($item->ID)),
+        ]);
+    }
+
+    public static function complete_item($item_id, $lease_owner, $content, $validations) {
+        $item = self::find_item($item_id);
+        if (!$item) {
+            return new WP_Error('ikoeh_connect_item_not_found', "Gutenberg item {$item_id} was not found.", ['status' => 404]);
+        }
+        if (self::STATUS_RUNNING !== self::status($item->ID) || !self::lease_is_valid($item->ID, $lease_owner)) {
+            return new WP_Error('ikoeh_connect_item_lease_invalid', 'The item finalization lease is no longer active.', ['status' => 409]);
+        }
+
+        $has_failures = !is_array($validations) || array_filter($validations, function ($v) {
+            return !is_array($v) || true !== ($v['isValid'] ?? false);
+        }) !== [];
+        if ($has_failures) {
+            return self::fail_item($item->ID, $lease_owner, is_array($validations) ? $validations : [['message' => 'JS validation failed.']], 'JS validation failed; canonical content was not written.');
+        }
+
+        $target_id = self::meta_int($item->ID, self::META_TARGET_ID);
+        $target = get_post($target_id);
+        if (!$target) {
+            return self::fail_item($item->ID, $lease_owner, [['message' => 'The target post no longer exists.']], 'Target post missing.');
+        }
+
+        $base_hash = self::meta_string($item->ID, self::META_BASE_CONTENT_HASH);
+        if ('' !== $base_hash && !hash_equals($base_hash, self::content_hash($target->post_content))) {
+            return self::conflict_item($item);
+        }
+
+        update_post_meta($item->ID, self::META_FINALIZED_CONTENT, wp_slash($content));
+        self::set_status($item->ID, self::STATUS_PREPARED);
+        self::clear_lease($item->ID);
+        update_post_meta($item->ID, self::META_VALIDATION_ERRORS, []);
+
+        $batch = self::find_batch($item->post_parent);
+        $batch_result = $batch ? self::finish_batch_if_complete($batch) : ['done' => true, 'batch' => null];
+        if (is_wp_error($batch_result)) {
+            return $batch_result;
+        }
+
+        return ['item' => self::shape_item(self::find_item($item->ID)), 'batch' => $batch_result['batch'], 'done' => $batch_result['done'] ?? false];
+    }
+
+    private static function finish_batch_if_complete(WP_Post $batch) {
+        if (!empty(self::get_items($batch->ID, [self::STATUS_READY]))) {
+            return ['done' => false, 'batch' => self::shape_batch($batch)];
+        }
+        if (!empty(self::get_items($batch->ID, [self::STATUS_FAILED, self::STATUS_CONFLICTED]))) {
+            self::set_status($batch->ID, self::STATUS_FAILED);
+            self::clear_lease($batch->ID);
+            return ['done' => true, 'batch' => self::shape_batch(self::find_batch($batch->ID))];
+        }
+        if (!empty(self::get_items($batch->ID, [self::STATUS_RUNNING]))) {
+            return ['done' => false, 'batch' => self::shape_batch($batch)];
+        }
+
+        return self::commit_prepared_items($batch, self::get_items($batch->ID, [self::STATUS_PREPARED]));
+    }
+
+    private static function commit_prepared_items(WP_Post $batch, array $prepared_items) {
+        if (empty($prepared_items)) {
+            self::set_status($batch->ID, self::STATUS_FINALIZED);
+            self::clear_lease($batch->ID);
+            return ['done' => true, 'batch' => self::shape_batch(self::find_batch($batch->ID))];
+        }
+
+        foreach ($prepared_items as $item) {
+            $target = get_post(self::meta_int($item->ID, self::META_TARGET_ID));
+            $base_hash = self::meta_string($item->ID, self::META_BASE_CONTENT_HASH);
+            if (!$target) {
+                return self::fail_item($item->ID, self::meta_string($item->ID, self::META_LEASE_OWNER), [['message' => 'The target post no longer exists.']], 'Target post missing; live content was left unchanged.');
+            }
+            if ('' !== $base_hash && !hash_equals($base_hash, self::content_hash($target->post_content))) {
+                return self::conflict_item($item);
+            }
+        }
+
+        $written = [];
+        foreach ($prepared_items as $item) {
+            $target = get_post(self::meta_int($item->ID, self::META_TARGET_ID));
+            $updated = wp_update_post([
+                'ID' => $target->ID,
+                'post_content' => wp_slash(self::meta_string($item->ID, self::META_FINALIZED_CONTENT)),
+            ], true);
+
+            if (is_wp_error($updated)) {
+                foreach (array_reverse($written) as $written_item) {
+                    $written_target = get_post(self::meta_int($written_item->ID, self::META_TARGET_ID));
+                    if ($written_target) {
+                        wp_update_post(['ID' => $written_target->ID, 'post_content' => wp_slash(self::meta_string($written_item->ID, self::META_BASE_CONTENT))], true);
+                    }
+                }
+                return new WP_Error('ikoeh_connect_gutenberg_write_failed', $updated->get_error_message(), ['status' => 500]);
+            }
+
+            $written[] = $item;
+        }
+
+        foreach ($prepared_items as $item) {
+            self::set_status($item->ID, self::STATUS_FINALIZED);
+            self::clear_lease($item->ID);
+            delete_post_meta($item->ID, self::META_BASE_CONTENT);
+            delete_post_meta($item->ID, self::META_FINALIZED_CONTENT);
+        }
+
+        self::set_status($batch->ID, self::STATUS_FINALIZED);
+        self::clear_lease($batch->ID);
+
+        return ['done' => true, 'batch' => self::shape_batch(self::find_batch($batch->ID))];
+    }
 }

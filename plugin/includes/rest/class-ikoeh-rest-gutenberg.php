@@ -54,6 +54,36 @@ class Ikoeh_Connect_Rest_Gutenberg {
             'callback' => [__CLASS__, 'get_content'],
             'permission_callback' => Ikoeh_Connect_Auth::require_scope('gutenberg'),
         ]);
+
+        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-claim-batch', [
+            'methods' => 'POST',
+            'callback' => [__CLASS__, 'claim_batch'],
+            'permission_callback' => [__CLASS__, 'require_admin_session'],
+        ]);
+
+        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-claim-item', [
+            'methods' => 'POST',
+            'callback' => [__CLASS__, 'claim_item'],
+            'permission_callback' => [__CLASS__, 'require_admin_session'],
+        ]);
+
+        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-complete-item', [
+            'methods' => 'POST',
+            'callback' => [__CLASS__, 'complete_item'],
+            'permission_callback' => [__CLASS__, 'require_admin_session'],
+        ]);
+
+        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-heartbeat', [
+            'methods' => 'POST',
+            'callback' => [__CLASS__, 'heartbeat'],
+            'permission_callback' => [__CLASS__, 'require_admin_session'],
+        ]);
+
+        register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-runtime', [
+            'methods' => 'GET',
+            'callback' => [__CLASS__, 'runtime'],
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope('gutenberg'),
+        ]);
     }
 
     private static function respond($result) {
@@ -121,5 +151,65 @@ class Ikoeh_Connect_Rest_Gutenberg {
 
     public static function get_content(WP_REST_Request $request) {
         return self::respond(Ikoeh_Connect_Gutenberg_Store::get_target_blocks((int) $request->get_param('id')));
+    }
+
+    /**
+     * Gated by a logged-in wp-admin session with a valid REST nonce, not the
+     * Bearer-token scope system -- these routes are called only by the Fila
+     * de Blocos admin page's own JS, running in the operator's browser.
+     */
+    public static function require_admin_session() {
+        return current_user_can('edit_posts');
+    }
+
+    public static function claim_batch(WP_REST_Request $request) {
+        $result = Ikoeh_Connect_Gutenberg_Store::claim_batch((int) $request->get_param('id'));
+        if (is_wp_error($result)) {
+            return $result;
+        }
+        $response = new WP_REST_Response($result, 200);
+        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
+        return $response;
+    }
+
+    public static function claim_item(WP_REST_Request $request) {
+        $result = Ikoeh_Connect_Gutenberg_Store::claim_next_item(
+            (int) $request->get_param('batch_id'),
+            (string) $request->get_param('lease_owner')
+        );
+        if (is_wp_error($result)) {
+            return $result;
+        }
+        $response = new WP_REST_Response($result, 200);
+        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
+        return $response;
+    }
+
+    public static function complete_item(WP_REST_Request $request) {
+        $result = Ikoeh_Connect_Gutenberg_Store::complete_item(
+            (int) $request->get_param('item_id'),
+            (string) $request->get_param('lease_owner'),
+            (string) $request->get_param('content'),
+            $request->get_param('validations')
+        );
+        if (is_wp_error($result)) {
+            return $result;
+        }
+        $response = new WP_REST_Response($result, 200);
+        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
+        return $response;
+    }
+
+    public static function heartbeat() {
+        Ikoeh_Connect_Gutenberg_Store::heartbeat();
+        $response = new WP_REST_Response(['ok' => true], 200);
+        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
+        return $response;
+    }
+
+    public static function runtime(WP_REST_Request $request) {
+        $response = new WP_REST_Response(Ikoeh_Connect_Gutenberg_Store::runtime_status((int) $request->get_param('id')), 200);
+        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
+        return $response;
     }
 }

@@ -161,6 +161,36 @@ jobs:
         run: |
           code=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-batches")
           test "$code" = "401"
+      - name: Verify Gutenberg claim/complete/finalize cycle (simulating the Fila de Blocos JS)
+        run: |
+          POST_ID=$(docker compose run --rm wp-cli wp post create --post_type=page \
+            --post_title="CI Gutenberg Finalize" --post_status=publish --post_content="<!-- wp:paragraph --><p>original</p><!-- /wp:paragraph -->" \
+            --porcelain --path=/var/www/html)
+          BATCH_ID=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-batch" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"label":"CI finalize"}' \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['batch_id'])")
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-item" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d "{\"batch_id\":$BATCH_ID,\"target_id\":$POST_ID,\"target_type\":\"page\",\"operation\":\"update\",\"block_spec\":[{\"name\":\"core/paragraph\",\"attributes\":{\"content\":\"updated\"}}]}"
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-enable-finalization" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"batch_id\":$BATCH_ID}"
+          # Simulate the browser-side finalizer using an admin cookie instead of the Bearer token,
+          # matching how the internal routes are actually gated.
+          docker compose run --rm wp-cli wp user application-password create admin ci --porcelain --path=/var/www/html > /tmp/apppass.txt
+          APPPASS=$(cat /tmp/apppass.txt)
+          AUTH=$(python3 -c "import base64; print(base64.b64encode(b'admin:$APPPASS').decode())")
+          LEASE_OWNER=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-claim-batch?id=$BATCH_ID" \
+            -H "Authorization: Basic $AUTH" | python3 -c "import sys,json; print(json.load(sys.stdin)['lease_owner'])")
+          ITEM_ID=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-claim-item" \
+            -H "Authorization: Basic $AUTH" -H "Content-Type: application/json" \
+            -d "{\"batch_id\":$BATCH_ID,\"lease_owner\":\"$LEASE_OWNER\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['item']['item_id'])")
+          DONE=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-complete-item" \
+            -H "Authorization: Basic $AUTH" -H "Content-Type: application/json" \
+            -d "{\"item_id\":$ITEM_ID,\"lease_owner\":\"$LEASE_OWNER\",\"content\":\"<!-- wp:paragraph --><p>updated</p><!-- /wp:paragraph -->\",\"validations\":[{\"isValid\":true}]}" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['batch']['status'])")
+          test "$DONE" = "finalized"
+          content=$(docker compose run --rm wp-cli wp post get "$POST_ID" --field=post_content --path=/var/www/html)
+          echo "$content" | grep -q "updated"
       - name: Tear down
         if: always()
         run: docker compose down -v
