@@ -599,7 +599,12 @@ class Ikoeh_Connect_Rest_Gutenberg {
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-batches', [
             'methods' => 'GET',
             'callback' => [__CLASS__, 'list_batches'],
-            'permission_callback' => Ikoeh_Connect_Auth::require_scope('gutenberg'),
+            // Dual-auth: the external Bearer-token agent lists its own batches,
+            // AND the Fila de Blocos page's own JS (a real wp-admin session,
+            // no Bearer token) needs this same route to find READY batches to
+            // claim -- confirmed live that a plain require_scope() 401s the
+            // browser session outright.
+            'permission_callback' => Ikoeh_Connect_Auth::require_scope_or_admin_session('gutenberg'),
         ]);
 
         register_rest_route(IKOEH_CONNECT_REST_NAMESPACE, '/gutenberg-item', [
@@ -711,6 +716,28 @@ const ALL_SCOPES = ['plugins', 'content', 'db', 'logs_cache', 'elementor', 'them
 In `plugin/includes/class-ikoeh-admin.php`, add to `SCOPE_LABELS` (after the `admin_access` line):
 ```php
         'gutenberg' => 'Gutenberg (mudancas pendentes)',
+```
+
+Also add this new helper to `plugin/includes/class-ikoeh-auth.php`, right before `setup_rate_limit_ok()` (needed by `/gutenberg-batches` below and by Task 4's finalizer JS, which calls that same route from a real wp-admin session with no Bearer token):
+```php
+    /**
+     * Some routes are legitimately called by both the external Bearer-token
+     * agent AND a logged-in wp-admin browser session (e.g. GET
+     * /gutenberg-batches -- the agent lists batches it created, and the
+     * Fila de Blocos page's own JS needs this same route to find READY
+     * batches to claim, but a browser session never carries a Bearer
+     * token). Accept either: a real WP session with edit_posts, or the
+     * normal scope check.
+     */
+    public static function require_scope_or_admin_session($scope = null) {
+        $scope_check = self::require_scope($scope);
+        return function (WP_REST_Request $request) use ($scope_check) {
+            if (current_user_can('edit_posts')) {
+                return true;
+            }
+            return $scope_check($request);
+        };
+    }
 ```
 
 - [ ] **Step 4: Wire into the plugin bootstrap**
@@ -1341,22 +1368,45 @@ class Ikoeh_Connect_Gutenberg_Admin {
         }
     }
 
+    function collectBlockNames(specs) {
+        var names = [];
+        specs.forEach(function (spec) {
+            names.push(spec.name);
+            if (spec.innerBlocks && spec.innerBlocks.length) {
+                names = names.concat(collectBlockNames(spec.innerBlocks));
+            }
+        });
+        return names;
+    }
+
     function specToBlock(spec) {
         var innerBlocks = (spec.innerBlocks || []).map(specToBlock);
         return wp.blocks.createBlock(spec.name, spec.attributes || {}, innerBlocks);
     }
 
     function validateAndSerialize(blockSpecs) {
-        var blocks = blockSpecs.map(specToBlock);
-        var validations = blocks.map(function (block) {
-            var blockType = wp.blocks.getBlockType(block.name);
-            if (!blockType) {
-                return { isValid: false, message: "Unknown block type: " + block.name };
-            }
-            return { isValid: true };
+        // wp.blocks.createBlock() internally looks up the block type and
+        // throws/dereferences on an unregistered name instead of failing
+        // gracefully -- so every name (recursively, through innerBlocks)
+        // must be checked with getBlockType() BEFORE any createBlock() call,
+        // never after. Checking after was confirmed live to let an unknown
+        // block name crash out of the whole polling loop instead of
+        // reporting a normal isValid:false failure back to the server.
+        var unknownNames = collectBlockNames(blockSpecs).filter(function (name) {
+            return !wp.blocks.getBlockType(name);
         });
+        if (unknownNames.length > 0) {
+            return {
+                content: "",
+                validations: unknownNames.map(function (name) {
+                    return { isValid: false, message: "Unknown block type: " + name };
+                }),
+            };
+        }
+
+        var blocks = blockSpecs.map(specToBlock);
         var content = wp.blocks.serialize(blocks);
-        return { content: content, validations: validations };
+        return { content: content, validations: blocks.map(function () { return { isValid: true }; }) };
     }
 
     function processItem(batchId, leaseOwner) {
@@ -1364,7 +1414,12 @@ class Ikoeh_Connect_Gutenberg_Admin {
             method: "POST",
             body: JSON.stringify({ batch_id: batchId, lease_owner: leaseOwner }),
         }).then(function (result) {
-            if (result.done) {
+            // claim_next_item() can return {done:false, batch:...} with no
+            // "item" key (e.g. another item in the same batch is still
+            // RUNNING under a still-valid lease) -- treat that the same as
+            // done for this tick rather than crashing on result.item.block_spec;
+            // the outer tick() loop retries on its next poll regardless.
+            if (result.done || !result.item) {
                 return result;
             }
             var result2 = validateAndSerialize(result.item.block_spec);
