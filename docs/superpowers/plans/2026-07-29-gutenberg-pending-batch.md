@@ -332,7 +332,7 @@ class Ikoeh_Connect_Gutenberg_Store {
 
         $result = wp_insert_post([
             'post_type' => self::POST_TYPE, 'post_status' => 'publish',
-            'post_title' => $label, 'post_excerpt' => wp_strip_all_tags($agent_note),
+            'post_title' => wp_slash($label), 'post_excerpt' => wp_slash(wp_strip_all_tags($agent_note)),
         ], true);
 
         if (is_wp_error($result)) {
@@ -360,7 +360,7 @@ class Ikoeh_Connect_Gutenberg_Store {
         $title = '' !== trim($target->post_title) ? $target->post_title : "(no title) #{$target->ID}";
         $result = wp_insert_post([
             'post_type' => self::POST_TYPE, 'post_status' => 'publish', 'post_parent' => $batch_id,
-            'post_title' => $title, 'post_excerpt' => "{$operation} for {$target->post_type} #{$target->ID}",
+            'post_title' => wp_slash($title), 'post_excerpt' => wp_slash("{$operation} for {$target->post_type} #{$target->ID}"),
         ], true);
 
         if (is_wp_error($result)) {
@@ -371,8 +371,8 @@ class Ikoeh_Connect_Gutenberg_Store {
         update_post_meta($item_id, self::META_KIND, self::KIND_ITEM);
         self::set_status($item_id, self::STATUS_DRAFT);
         update_post_meta($item_id, self::META_TARGET_ID, $target_id);
-        update_post_meta($item_id, self::META_TARGET_TYPE, $target_type);
-        update_post_meta($item_id, self::META_OPERATION, $operation);
+        update_post_meta($item_id, self::META_TARGET_TYPE, wp_slash($target_type));
+        update_post_meta($item_id, self::META_OPERATION, wp_slash($operation));
         update_post_meta($item_id, self::META_BASE_CONTENT_HASH, self::content_hash($target->post_content));
         update_post_meta($item_id, self::META_BASE_CONTENT, wp_slash($target->post_content));
         update_post_meta($item_id, self::META_BLOCK_SPEC, wp_slash($encoded));
@@ -432,7 +432,7 @@ class Ikoeh_Connect_Gutenberg_Store {
             'last_error' => self::meta_string($batch->ID, self::META_LAST_ERROR),
             'finalization_required' => !in_array(self::status($batch->ID), self::TERMINAL_STATUSES, true),
             'finalization_url' => add_query_arg(['page' => 'ikoeh-connect-gutenberg-queue'], admin_url('admin.php')),
-            'items' => array_map(['self', 'shape_item'], $items),
+            'items' => array_map([self::class, 'shape_item'], $items),
         ];
     }
 }
