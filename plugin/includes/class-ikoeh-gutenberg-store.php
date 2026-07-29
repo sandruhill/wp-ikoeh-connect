@@ -608,7 +608,8 @@ class Ikoeh_Connect_Gutenberg_Store {
             return !is_array($v) || true !== ($v['isValid'] ?? false);
         }) !== [];
         if ($has_failures) {
-            return self::fail_item($item->ID, $lease_owner, is_array($validations) ? $validations : [['message' => 'JS validation failed.']], 'JS validation failed; canonical content was not written.');
+            $safe_validations = is_array($validations) ? wp_slash($validations) : [['message' => 'JS validation failed.']];
+            return self::fail_item($item->ID, $lease_owner, $safe_validations, 'JS validation failed; canonical content was not written.');
         }
 
         $target_id = self::meta_int($item->ID, self::META_TARGET_ID);
@@ -652,6 +653,31 @@ class Ikoeh_Connect_Gutenberg_Store {
         return self::commit_prepared_items($batch, self::get_items($batch->ID, [self::STATUS_PREPARED]));
     }
 
+    /**
+     * Fails a PREPARED item during commit. Unlike fail_item(), this does NOT
+     * check STATUS_RUNNING/lease validity -- by the time commit_prepared_items()
+     * runs, complete_item() has already moved every item to PREPARED and
+     * cleared its lease, so fail_item()'s running/lease guard would always
+     * trip here and silently no-op, leaving the batch stuck in RUNNING
+     * forever (it can only be reclaimed from READY/FAILED).
+     */
+    private static function fail_prepared_item(WP_Post $item, $errors, $message) {
+        self::set_status($item->ID, self::STATUS_FAILED);
+        self::clear_lease($item->ID);
+        update_post_meta($item->ID, self::META_VALIDATION_ERRORS, $errors);
+
+        $batch = self::find_batch($item->post_parent);
+        if ($batch) {
+            self::set_status($batch->ID, self::STATUS_FAILED);
+            self::clear_lease($batch->ID);
+            update_post_meta($batch->ID, self::META_LAST_ERROR, $message);
+        }
+
+        return new WP_Error('ikoeh_connect_gutenberg_prepared_item_failed', $message, [
+            'status' => 500, 'item' => self::shape_item(self::find_item($item->ID)),
+        ]);
+    }
+
     private static function commit_prepared_items(WP_Post $batch, array $prepared_items) {
         if (empty($prepared_items)) {
             self::set_status($batch->ID, self::STATUS_FINALIZED);
@@ -663,7 +689,7 @@ class Ikoeh_Connect_Gutenberg_Store {
             $target = get_post(self::meta_int($item->ID, self::META_TARGET_ID));
             $base_hash = self::meta_string($item->ID, self::META_BASE_CONTENT_HASH);
             if (!$target) {
-                return self::fail_item($item->ID, self::meta_string($item->ID, self::META_LEASE_OWNER), [['message' => 'The target post no longer exists.']], 'Target post missing; live content was left unchanged.');
+                return self::fail_prepared_item($item, [['message' => 'The target post no longer exists.']], 'Target post missing; live content was left unchanged.');
             }
             if ('' !== $base_hash && !hash_equals($base_hash, self::content_hash($target->post_content))) {
                 return self::conflict_item($item);
@@ -679,13 +705,22 @@ class Ikoeh_Connect_Gutenberg_Store {
             ], true);
 
             if (is_wp_error($updated)) {
+                $rollback_ok = true;
                 foreach (array_reverse($written) as $written_item) {
                     $written_target = get_post(self::meta_int($written_item->ID, self::META_TARGET_ID));
-                    if ($written_target) {
-                        wp_update_post(['ID' => $written_target->ID, 'post_content' => wp_slash(self::meta_string($written_item->ID, self::META_BASE_CONTENT))], true);
+                    if (!$written_target) {
+                        $rollback_ok = false;
+                        continue;
+                    }
+                    $restored = wp_update_post(['ID' => $written_target->ID, 'post_content' => wp_slash(self::meta_string($written_item->ID, self::META_BASE_CONTENT))], true);
+                    if (is_wp_error($restored)) {
+                        $rollback_ok = false;
                     }
                 }
-                return new WP_Error('ikoeh_connect_gutenberg_write_failed', $updated->get_error_message(), ['status' => 500]);
+                $message = $rollback_ok
+                    ? 'WordPress failed to write post_content; live content was left unchanged.'
+                    : 'WordPress failed to write post_content and rollback failed; inspect the affected targets before retrying.';
+                return self::fail_prepared_item($item, [['message' => $updated->get_error_message()]], $message);
             }
 
             $written[] = $item;

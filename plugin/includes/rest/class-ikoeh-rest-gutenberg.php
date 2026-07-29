@@ -162,42 +162,47 @@ class Ikoeh_Connect_Rest_Gutenberg {
         return current_user_can('edit_posts');
     }
 
-    public static function claim_batch(WP_REST_Request $request) {
-        $result = Ikoeh_Connect_Gutenberg_Store::claim_batch((int) $request->get_param('id'));
+    /**
+     * A WP_Error has no header() method, so returning it directly from a
+     * callback skips no_cache_headers() (and the litespeed_control_set_nocache
+     * call inside it) on every 409/404/500 the finalizer state machine
+     * produces under contention -- exactly when LiteSpeed Cache must not be
+     * allowed to replay a stale response. Build the REST response ourselves
+     * either way so no_cache_headers() always runs.
+     */
+    private static function respond_no_cache($result) {
         if (is_wp_error($result)) {
-            return $result;
+            $status = $result->get_error_data()['status'] ?? 500;
+            $response = new WP_REST_Response([
+                'code' => $result->get_error_code(),
+                'message' => $result->get_error_message(),
+                'data' => $result->get_error_data(),
+            ], $status);
+        } else {
+            $response = new WP_REST_Response($result, 200);
         }
-        $response = new WP_REST_Response($result, 200);
         Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
         return $response;
+    }
+
+    public static function claim_batch(WP_REST_Request $request) {
+        return self::respond_no_cache(Ikoeh_Connect_Gutenberg_Store::claim_batch((int) $request->get_param('id')));
     }
 
     public static function claim_item(WP_REST_Request $request) {
-        $result = Ikoeh_Connect_Gutenberg_Store::claim_next_item(
+        return self::respond_no_cache(Ikoeh_Connect_Gutenberg_Store::claim_next_item(
             (int) $request->get_param('batch_id'),
             (string) $request->get_param('lease_owner')
-        );
-        if (is_wp_error($result)) {
-            return $result;
-        }
-        $response = new WP_REST_Response($result, 200);
-        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
-        return $response;
+        ));
     }
 
     public static function complete_item(WP_REST_Request $request) {
-        $result = Ikoeh_Connect_Gutenberg_Store::complete_item(
+        return self::respond_no_cache(Ikoeh_Connect_Gutenberg_Store::complete_item(
             (int) $request->get_param('item_id'),
             (string) $request->get_param('lease_owner'),
             (string) $request->get_param('content'),
             $request->get_param('validations')
-        );
-        if (is_wp_error($result)) {
-            return $result;
-        }
-        $response = new WP_REST_Response($result, 200);
-        Ikoeh_Connect_Gutenberg_Store::no_cache_headers($response);
-        return $response;
+        ));
     }
 
     public static function heartbeat() {
