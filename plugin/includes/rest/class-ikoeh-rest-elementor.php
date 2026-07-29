@@ -163,11 +163,19 @@ class Ikoeh_Connect_Rest_Elementor {
     }
 
     /**
-     * Recursively fix the two schema issues that make Elementor 4.x silently
-     * discard a manually-written element tree:
+     * Recursively fix schema issues that make Elementor 4.x either silently
+     * discard a manually-written element tree, or render it at roughly
+     * double the intended height:
      * - every node needs an "elements" key, even if empty ([] not absent)
      * - top-level containers need settings.content_width = "full", or they
      *   render boxed at 1140px regardless of inner widget config
+     * - any container using container_type:"grid" needs grid_rows_grid set
+     *   explicitly. Elementor's own default for that control is
+     *   {unit:"fr", size:2} -- with no fixed grid height, that reserves a
+     *   full second row's worth of space even when every item fits in row
+     *   1, roughly doubling the section's rendered height. Confirmed via
+     *   getBoundingClientRect() in production: a 2-column grid whose content
+     *   needed ~480px was rendering at 963px until this was set to size:1.
      */
     private static function normalize_elements(array $elements, $depth = 0) {
         foreach ($elements as &$element) {
@@ -175,12 +183,20 @@ class Ikoeh_Connect_Rest_Elementor {
                 $element['elements'] = [];
             }
 
-            if ($depth === 0 && ($element['elType'] ?? null) === 'container') {
+            if (($element['elType'] ?? null) === 'container') {
                 if (!isset($element['settings']) || !is_array($element['settings'])) {
                     $element['settings'] = [];
                 }
-                if (!isset($element['settings']['content_width'])) {
+
+                if ($depth === 0 && !isset($element['settings']['content_width'])) {
                     $element['settings']['content_width'] = 'full';
+                }
+
+                if (
+                    ($element['settings']['container_type'] ?? null) === 'grid'
+                    && !isset($element['settings']['grid_rows_grid'])
+                ) {
+                    $element['settings']['grid_rows_grid'] = ['unit' => 'fr', 'size' => 1];
                 }
             }
 
