@@ -23,6 +23,7 @@ require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-auth.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-setup.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-admin.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-chat.php';
+require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-chat-admin.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-site-info.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-plugins.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-content.php';
@@ -51,6 +52,7 @@ register_deactivation_hook(__FILE__, ['Ikoeh_Connect_Gutenberg_Store', 'unschedu
 
 add_action('admin_menu', ['Ikoeh_Connect_Admin', 'register_menu']);
 add_action('admin_menu', ['Ikoeh_Connect_Gutenberg_Admin', 'register_menu']);
+add_action('admin_menu', ['Ikoeh_Connect_Chat_Admin', 'register_menu']);
 add_action('init', ['Ikoeh_Connect_Admin', 'register_ajax']);
 add_action('init', ['Ikoeh_Connect_Chat', 'register_ajax']);
 
