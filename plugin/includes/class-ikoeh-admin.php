@@ -17,6 +17,7 @@ class Ikoeh_Connect_Admin {
         'gutenberg' => 'Gutenberg (mudancas pendentes)',
         'skills' => 'Skills',
         'design' => 'Design System',
+        'system' => 'Sistema (arquivos/PHP/WP-CLI)',
     ];
 
     const NAME_OPTIONS = ['ChatGPT', 'Claude.ai', 'Claude Code', 'Outro'];

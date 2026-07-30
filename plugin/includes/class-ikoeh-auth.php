@@ -10,7 +10,7 @@ class Ikoeh_Connect_Auth {
     const LEGACY_TOKEN_HASH_OPTION = 'ikoeh_connect_token_hash';
     const LEGACY_LAST_USED_OPTION = 'ikoeh_connect_last_used_at';
 
-    const ALL_SCOPES = ['plugins', 'content', 'db', 'logs_cache', 'elementor', 'theme', 'media', 'admin_access', 'gutenberg', 'skills', 'design'];
+    const ALL_SCOPES = ['plugins', 'content', 'db', 'logs_cache', 'elementor', 'theme', 'media', 'admin_access', 'gutenberg', 'skills', 'design', 'system'];
 
     public static function maybe_migrate() {
         if (get_option(self::MIGRATED_OPTION, false)) {
