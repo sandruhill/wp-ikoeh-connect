@@ -212,6 +212,32 @@ jobs:
         run: |
           code=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:8080/wp-json/ikoeh-connect/v1/skills")
           test "$code" = "401"
+      - name: Verify design save/check/activate/library/delete round-trips
+        run: |
+          DESIGN_MD=$'---\nname: CI Test Brand\ndescription: a test brand\ncolors:\n  primary: "#112233"\ntypography:\n  body:\n    fontFamily: Inter\n---\n\nSome guidance text.'
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/design" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            --data-raw "$(python3 -c "import json,sys; print(json.dumps({'content': sys.argv[1]}))" "$DESIGN_MD")"
+          ready=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/design-check?slug=ci-test-brand" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['ready'])")
+          test "$ready" = "True"
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/design-activate" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"slug":"ci-test-brand"}'
+          active_slug=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/design-active" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['slug'])")
+          test "$active_slug" = "ci-test-brand"
+          count=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/design-library" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          test "$count" -gt "0"
+          curl -sS -X DELETE "http://localhost:8080/wp-json/ikoeh-connect/v1/design?slug=ci-test-brand" \
+            -H "Authorization: Bearer $TOKEN"
+          active_after=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/design-active" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['active'])")
+          test "$active_after" = "None"
+      - name: Verify design unauthenticated request is rejected
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:8080/wp-json/ikoeh-connect/v1/design-library")
+          test "$code" = "401"
       - name: Tear down
         if: always()
         run: docker compose down -v

@@ -37,10 +37,13 @@ require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-gutenberg-store.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-gutenberg.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-gutenberg-admin.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-skills.php';
+require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-design-tokens.php';
+require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-design.php';
 
 add_action('init', ['Ikoeh_Connect_Auth', 'maybe_migrate']);
 add_action('init', ['Ikoeh_Connect_Gutenberg_Store', 'register_post_type']);
 add_action('init', ['Ikoeh_Connect_Rest_Skills', 'register_post_type']);
+add_action('init', ['Ikoeh_Connect_Rest_Design', 'register_post_type']);
 add_action('init', ['Ikoeh_Connect_Gutenberg_Store', 'schedule_cleanup']);
 add_action('ikoeh_gb_cleanup', ['Ikoeh_Connect_Gutenberg_Store', 'cleanup']);
 register_deactivation_hook(__FILE__, ['Ikoeh_Connect_Gutenberg_Store', 'unschedule_cleanup']);
@@ -64,6 +67,7 @@ add_action('rest_api_init', function () {
     Ikoeh_Connect_Rest_Admin_Access::register_routes();
     Ikoeh_Connect_Rest_Gutenberg::register_routes();
     Ikoeh_Connect_Rest_Skills::register_routes();
+    Ikoeh_Connect_Rest_Design::register_routes();
 });
 
 /**

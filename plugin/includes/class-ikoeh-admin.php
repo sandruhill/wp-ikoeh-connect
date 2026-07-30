@@ -16,6 +16,7 @@ class Ikoeh_Connect_Admin {
         'admin_access' => 'Acesso admin temporário',
         'gutenberg' => 'Gutenberg (mudancas pendentes)',
         'skills' => 'Skills',
+        'design' => 'Design System',
     ];
 
     const NAME_OPTIONS = ['ChatGPT', 'Claude.ai', 'Claude Code', 'Outro'];
