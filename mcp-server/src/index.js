@@ -17,6 +17,7 @@ import { registerPostsTools } from "./tools/posts.js";
 import { registerAdminAccessTools } from "./tools/admin-access.js";
 import { registerGutenbergTools } from "./tools/gutenberg.js";
 import { registerSkillsTools } from "./tools/skills.js";
+import { registerDesignTools } from "./tools/design.js";
 
 async function registerSkillPrompts(server, client) {
   let skills;
@@ -73,6 +74,7 @@ registerPostsTools(server, client);
 registerAdminAccessTools(server, client);
 registerGutenbergTools(server, client);
 registerSkillsTools(server, client);
+registerDesignTools(server, client);
 
 await registerSkillPrompts(server, client);
 
