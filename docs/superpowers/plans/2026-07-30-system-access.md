@@ -93,11 +93,15 @@ class Ikoeh_Connect_System_Path {
                 return new WP_Error('ikoeh_connect_path_not_found', "Path does not exist: {$path}", ['status' => 404]);
             }
         } else {
+            $base = basename($path);
+            if ('.' === $base || '..' === $base) {
+                return new WP_Error('ikoeh_connect_invalid_path', 'Invalid file name.', ['status' => 400]);
+            }
             $parent = realpath(dirname($path));
             if (false === $parent) {
                 return new WP_Error('ikoeh_connect_parent_not_found', 'Parent directory does not exist: ' . dirname($path), ['status' => 404]);
             }
-            $resolved = rtrim($parent, '/\\') . '/' . basename($path);
+            $resolved = rtrim($parent, '/\\') . '/' . $base;
         }
 
         $real_root = realpath(ABSPATH);
