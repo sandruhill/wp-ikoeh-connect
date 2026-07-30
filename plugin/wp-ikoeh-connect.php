@@ -42,8 +42,10 @@ require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-skills.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-design-tokens.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-design.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-system-path.php';
+require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-system-installer.php';
 
 add_action('init', ['Ikoeh_Connect_Auth', 'maybe_migrate']);
+add_action('init', ['Ikoeh_Connect_System_Installer', 'ensure_sandbox']);
 add_action('init', ['Ikoeh_Connect_Gutenberg_Store', 'register_post_type']);
 add_action('init', ['Ikoeh_Connect_Rest_Skills', 'register_post_type']);
 add_action('init', ['Ikoeh_Connect_Rest_Design', 'register_post_type']);
