@@ -1,0 +1,109 @@
+<?php
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * Server-side chat: the site owner's own Anthropic API key, a single
+ * continuing conversation history, and a plain (no tool-calling) message
+ * exchange. Entirely wp-admin-session-authenticated -- not part of the
+ * external Bearer-token/MCP system at all.
+ */
+class Ikoeh_Connect_Chat {
+
+    const OPTION_API_KEY = 'ikoeh_chat_api_key';
+    const OPTION_MODEL = 'ikoeh_chat_model';
+    const OPTION_HISTORY = 'ikoeh_chat_history';
+    const DEFAULT_MODEL = 'claude-sonnet-5';
+    const MAX_HISTORY_MESSAGES = 50;
+    const MAX_TOKENS = 1024;
+    const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+    const ANTHROPIC_VERSION = '2023-06-01';
+
+    public static function register_ajax() {
+        add_action('wp_ajax_ikoeh_chat_send', [__CLASS__, 'ajax_send']);
+    }
+
+    public static function get_history() {
+        $history = get_option(self::OPTION_HISTORY, []);
+        return is_array($history) ? $history : [];
+    }
+
+    private static function save_history(array $history) {
+        $trimmed = array_slice($history, -self::MAX_HISTORY_MESSAGES);
+        update_option(self::OPTION_HISTORY, $trimmed, false);
+        return $trimmed;
+    }
+
+    public static function ajax_send() {
+        check_ajax_referer('ikoeh_chat_send', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Sem permissão.']);
+        }
+
+        $api_key = get_option(self::OPTION_API_KEY, '');
+        if ('' === $api_key) {
+            wp_send_json_error(['message' => 'Configure uma chave de API da Anthropic primeiro.']);
+        }
+
+        $message = isset($_POST['message']) ? trim(wp_unslash($_POST['message'])) : '';
+        if ('' === $message) {
+            wp_send_json_error(['message' => 'Mensagem vazia.']);
+        }
+
+        $history = self::get_history();
+        $history[] = ['role' => 'user', 'content' => $message, 'timestamp' => time()];
+
+        $model = get_option(self::OPTION_MODEL, '') ?: self::DEFAULT_MODEL;
+
+        $api_messages = array_map(function ($entry) {
+            return ['role' => $entry['role'], 'content' => $entry['content']];
+        }, $history);
+
+        $response = wp_remote_post(self::ANTHROPIC_API_URL, [
+            'timeout' => 60,
+            'headers' => [
+                'x-api-key' => $api_key,
+                'anthropic-version' => self::ANTHROPIC_VERSION,
+                'Content-Type' => 'application/json',
+            ],
+            'body' => wp_json_encode([
+                'model' => $model,
+                'max_tokens' => self::MAX_TOKENS,
+                'messages' => $api_messages,
+            ]),
+        ]);
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(['message' => $response->get_error_message()]);
+        }
+
+        $code = wp_remote_retrieve_response_code($response);
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+
+        if (200 !== $code) {
+            $error_message = (is_array($body) && isset($body['error']['message']))
+                ? $body['error']['message']
+                : "Erro da API da Anthropic (HTTP {$code}).";
+            wp_send_json_error(['message' => $error_message]);
+        }
+
+        $reply_text = '';
+        if (is_array($body) && isset($body['content']) && is_array($body['content'])) {
+            foreach ($body['content'] as $block) {
+                if (isset($block['type'], $block['text']) && 'text' === $block['type']) {
+                    $reply_text .= $block['text'];
+                }
+            }
+        }
+        if ('' === $reply_text) {
+            $reply_text = '(resposta vazia)';
+        }
+
+        $history[] = ['role' => 'assistant', 'content' => $reply_text, 'timestamp' => time()];
+        $history = self::save_history($history);
+
+        wp_send_json_success(['history' => $history]);
+    }
+}

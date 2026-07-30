@@ -112,6 +112,20 @@ class Ikoeh_Connect_Admin {
             $notice = ['type' => 'success', 'text' => 'Conexão revogada.'];
         }
 
+        if (
+            isset($_POST['ikoeh_chat_save_settings']) &&
+            check_admin_referer('ikoeh_chat_settings_action', 'ikoeh_chat_settings_nonce')
+        ) {
+            $model = sanitize_text_field(wp_unslash($_POST['ikoeh_chat_model'] ?? Ikoeh_Connect_Chat::DEFAULT_MODEL));
+            update_option(Ikoeh_Connect_Chat::OPTION_MODEL, $model);
+
+            $new_key = isset($_POST['ikoeh_chat_api_key']) ? trim(wp_unslash($_POST['ikoeh_chat_api_key'])) : '';
+            if ('' !== $new_key) {
+                update_option(Ikoeh_Connect_Chat::OPTION_API_KEY, $new_key);
+            }
+            $notice = ['type' => 'success', 'text' => 'Configurações do chat salvas.'];
+        }
+
         $connections = Ikoeh_Connect_Auth::get_connections();
         $has_connections = count($connections) > 0;
 
@@ -238,6 +252,38 @@ class Ikoeh_Connect_Admin {
                 </table>
                 <p class="submit">
                     <button type="submit" name="ikoeh_connect_create" class="button button-primary">Gerar conexão</button>
+                </p>
+            </form>
+
+            <h2>Chat iKOEH</h2>
+            <?php
+            $chat_key = get_option(Ikoeh_Connect_Chat::OPTION_API_KEY, '');
+            $chat_key_status = '' !== $chat_key ? ('Chave configurada (termina em ...' . esc_html(substr($chat_key, -4)) . ')') : 'Nenhuma chave configurada';
+            $chat_model = get_option(Ikoeh_Connect_Chat::OPTION_MODEL, '') ?: Ikoeh_Connect_Chat::DEFAULT_MODEL;
+            ?>
+            <form method="post">
+                <?php wp_nonce_field('ikoeh_chat_settings_action', 'ikoeh_chat_settings_nonce'); ?>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">Chave de API (Anthropic)</th>
+                        <td>
+                            <p><?php echo esc_html($chat_key_status); ?></p>
+                            <input type="password" name="ikoeh_chat_api_key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="ikoeh-chat-model">Modelo</label></th>
+                        <td>
+                            <select name="ikoeh_chat_model" id="ikoeh-chat-model">
+                                <?php foreach (['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] as $model_option) : ?>
+                                    <option value="<?php echo esc_attr($model_option); ?>" <?php selected($chat_model, $model_option); ?>><?php echo esc_html($model_option); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </td>
+                    </tr>
+                </table>
+                <p class="submit">
+                    <button type="submit" name="ikoeh_chat_save_settings" class="button button-primary">Salvar configurações do chat</button>
                 </p>
             </form>
         </div>
