@@ -149,6 +149,8 @@ class Ikoeh_Connect_Admin {
         } else {
             $banner = ['bg' => '#fcf9e8', 'border' => '#dba617', 'dot' => '#dba617', 'text' => count($connections) . ' conexão(ões) criada(s), nenhuma usada nos últimos 7 dias'];
         }
+
+        $active_tab = (isset($_GET['tab']) && 'chat' === $_GET['tab']) ? 'chat' : 'connections';
         ?>
         <style>
             .ikoeh-connect-status-card { background: <?php echo esc_attr($banner['bg']); ?>; border-left: 4px solid <?php echo esc_attr($banner['border']); ?>; border-radius: 2px; padding: 4px 16px 16px; margin: 16px 0; }
@@ -173,133 +175,146 @@ class Ikoeh_Connect_Admin {
                 </div>
             <?php endif; ?>
 
-            <div class="ikoeh-connect-status-card">
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row">Status</th>
-                        <td><span class="ikoeh-connect-dot" style="background:<?php echo esc_attr($banner['dot']); ?>"></span><?php echo esc_html($banner['text']); ?></td>
-                    </tr>
-                </table>
-                <p>
-                    <button type="button" id="ikoeh-connect-test-api" class="button">Testar API</button>
-                    <span id="ikoeh-connect-test-result"></span>
-                </p>
-            </div>
+            <h2 class="nav-tab-wrapper">
+                <a href="<?php echo esc_url(add_query_arg(['page' => 'ikoeh-connect', 'tab' => 'connections'], admin_url('options-general.php'))); ?>" class="nav-tab <?php echo 'connections' === $active_tab ? 'nav-tab-active' : ''; ?>">Conexões</a>
+                <a href="<?php echo esc_url(add_query_arg(['page' => 'ikoeh-connect', 'tab' => 'chat'], admin_url('options-general.php'))); ?>" class="nav-tab <?php echo 'chat' === $active_tab ? 'nav-tab-active' : ''; ?>">Chat</a>
+            </h2>
 
-            <?php if ($has_connections) : ?>
-                <h2>Conexões</h2>
-                <table class="widefat striped">
-                    <thead>
+            <?php if ('connections' === $active_tab) : ?>
+                <div class="ikoeh-connect-status-card">
+                    <table class="form-table" role="presentation">
                         <tr>
-                            <th>Nome</th>
-                            <th>Escopos</th>
-                            <th>Última atividade</th>
-                            <th>Ação</th>
+                            <th scope="row">Status</th>
+                            <td><span class="ikoeh-connect-dot" style="background:<?php echo esc_attr($banner['dot']); ?>"></span><?php echo esc_html($banner['text']); ?></td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($connections as $connection) : ?>
+                    </table>
+                    <p>
+                        <button type="button" id="ikoeh-connect-test-api" class="button">Testar API</button>
+                        <span id="ikoeh-connect-test-result"></span>
+                    </p>
+                </div>
+
+                <?php if ($has_connections) : ?>
+                    <h2>Conexões</h2>
+                    <table class="widefat striped">
+                        <thead>
                             <tr>
-                                <td><?php echo esc_html($connection['name']); ?></td>
-                                <td>
-                                    <?php
-                                    $labels = array_map(function ($scope) {
-                                        return self::SCOPE_LABELS[$scope] ?? $scope;
-                                    }, $connection['scopes']);
-                                    echo esc_html(implode(', ', $labels));
-                                    ?>
-                                </td>
-                                <td>
-                                    <?php $status = self::connection_status($connection); ?>
-                                    <span class="ikoeh-connect-dot" style="background:<?php echo esc_attr($status['dot']); ?>"></span><?php echo esc_html($status['label']); ?>
-                                </td>
-                                <td>
-                                    <form method="post" onsubmit="return confirm('Revogar esta conexão? Quem estiver usando esse token perde acesso imediatamente.');">
-                                        <?php wp_nonce_field('ikoeh_connect_revoke_action', 'ikoeh_connect_revoke_nonce'); ?>
-                                        <input type="hidden" name="ikoeh_connect_revoke" value="<?php echo esc_attr($connection['id']); ?>">
-                                        <button type="submit" class="button button-link-delete">Revogar</button>
-                                    </form>
-                                </td>
+                                <th>Nome</th>
+                                <th>Escopos</th>
+                                <th>Última atividade</th>
+                                <th>Ação</th>
                             </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($connections as $connection) : ?>
+                                <tr>
+                                    <td><?php echo esc_html($connection['name']); ?></td>
+                                    <td>
+                                        <?php
+                                        $labels = array_map(function ($scope) {
+                                            return self::SCOPE_LABELS[$scope] ?? $scope;
+                                        }, $connection['scopes']);
+                                        echo esc_html(implode(', ', $labels));
+                                        ?>
+                                    </td>
+                                    <td>
+                                        <?php $status = self::connection_status($connection); ?>
+                                        <span class="ikoeh-connect-dot" style="background:<?php echo esc_attr($status['dot']); ?>"></span><?php echo esc_html($status['label']); ?>
+                                    </td>
+                                    <td>
+                                        <form method="post" onsubmit="return confirm('Revogar esta conexão? Quem estiver usando esse token perde acesso imediatamente.');">
+                                            <?php wp_nonce_field('ikoeh_connect_revoke_action', 'ikoeh_connect_revoke_nonce'); ?>
+                                            <input type="hidden" name="ikoeh_connect_revoke" value="<?php echo esc_attr($connection['id']); ?>">
+                                            <button type="submit" class="button button-link-delete">Revogar</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+
+                <h2>Nova conexão</h2>
+                <form method="post">
+                    <?php wp_nonce_field('ikoeh_connect_create_action', 'ikoeh_connect_nonce'); ?>
+                    <table class="form-table" role="presentation">
+                        <tr>
+                            <th scope="row"><label for="ikoeh-connect-name">Nome</label></th>
+                            <td>
+                                <select name="ikoeh_connect_name" id="ikoeh-connect-name">
+                                    <?php foreach (self::NAME_OPTIONS as $option) : ?>
+                                        <option value="<?php echo esc_attr($option); ?>"><?php echo esc_html($option); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <input type="text" name="ikoeh_connect_name_custom" id="ikoeh-connect-name-custom" placeholder="Nome customizado" style="display:none; margin-left:8px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Escopos</th>
+                            <td>
+                                <p class="ikoeh-connect-scopes-actions">
+                                    <a href="#" id="ikoeh-connect-select-all">Selecionar todos</a><a href="#" id="ikoeh-connect-select-none">Limpar seleção</a>
+                                </p>
+                                <?php foreach (self::SCOPE_LABELS as $scope => $label) : ?>
+                                    <label style="display:block; margin-bottom:4px;">
+                                        <input type="checkbox" class="ikoeh-connect-scope-checkbox" name="ikoeh_connect_scopes[]" value="<?php echo esc_attr($scope); ?>">
+                                        <?php echo esc_html($label); ?>
+                                    </label>
+                                <?php endforeach; ?>
+                            </td>
+                        </tr>
+                    </table>
+                    <p class="submit">
+                        <button type="submit" name="ikoeh_connect_create" class="button button-primary">Gerar conexão</button>
+                    </p>
+                </form>
             <?php endif; ?>
 
-            <h2>Nova conexão</h2>
-            <form method="post">
-                <?php wp_nonce_field('ikoeh_connect_create_action', 'ikoeh_connect_nonce'); ?>
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row"><label for="ikoeh-connect-name">Nome</label></th>
-                        <td>
-                            <select name="ikoeh_connect_name" id="ikoeh-connect-name">
-                                <?php foreach (self::NAME_OPTIONS as $option) : ?>
-                                    <option value="<?php echo esc_attr($option); ?>"><?php echo esc_html($option); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                            <input type="text" name="ikoeh_connect_name_custom" id="ikoeh-connect-name-custom" placeholder="Nome customizado" style="display:none; margin-left:8px;">
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Escopos</th>
-                        <td>
-                            <p class="ikoeh-connect-scopes-actions">
-                                <a href="#" id="ikoeh-connect-select-all">Selecionar todos</a><a href="#" id="ikoeh-connect-select-none">Limpar seleção</a>
-                            </p>
-                            <?php foreach (self::SCOPE_LABELS as $scope => $label) : ?>
-                                <label style="display:block; margin-bottom:4px;">
-                                    <input type="checkbox" class="ikoeh-connect-scope-checkbox" name="ikoeh_connect_scopes[]" value="<?php echo esc_attr($scope); ?>">
-                                    <?php echo esc_html($label); ?>
-                                </label>
-                            <?php endforeach; ?>
-                        </td>
-                    </tr>
-                </table>
-                <p class="submit">
-                    <button type="submit" name="ikoeh_connect_create" class="button button-primary">Gerar conexão</button>
-                </p>
-            </form>
+            <?php if ('chat' === $active_tab) : ?>
+                <?php
+                $chat_key = get_option(Ikoeh_Connect_Chat::OPTION_API_KEY, '');
+                $chat_key_status = '' !== $chat_key ? ('Chave configurada (termina em ...' . esc_html(substr($chat_key, -4)) . ')') : 'Nenhuma chave configurada';
+                $chat_model = get_option(Ikoeh_Connect_Chat::OPTION_MODEL, '') ?: Ikoeh_Connect_Chat::DEFAULT_MODEL;
+                ?>
+                <h2>Configurações do Chat</h2>
+                <form method="post">
+                    <?php wp_nonce_field('ikoeh_chat_settings_action', 'ikoeh_chat_settings_nonce'); ?>
+                    <table class="form-table" role="presentation">
+                        <tr>
+                            <th scope="row">Chave de API (Anthropic)</th>
+                            <td>
+                                <p><?php echo esc_html($chat_key_status); ?></p>
+                                <input type="password" name="ikoeh_chat_api_key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="ikoeh-chat-screenshot-key">Chave de API do Google (opcional)</label></th>
+                            <td>
+                                <input type="password" name="ikoeh_chat_screenshot_api_key" id="ikoeh-chat-screenshot-key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
+                                <p class="description">Nao obrigatoria -- a clonagem de site funciona sem isso. Configure uma chave gratuita do Google Cloud (API PageSpeed Insights habilitada) so se precisar de um limite maior de requisicoes.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="ikoeh-chat-model">Modelo</label></th>
+                            <td>
+                                <select name="ikoeh_chat_model" id="ikoeh-chat-model">
+                                    <?php foreach (['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] as $model_option) : ?>
+                                        <option value="<?php echo esc_attr($model_option); ?>" <?php selected($chat_model, $model_option); ?>><?php echo esc_html($model_option); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                        </tr>
+                    </table>
+                    <p class="submit">
+                        <button type="submit" name="ikoeh_chat_save_settings" class="button button-primary">Salvar configurações do chat</button>
+                    </p>
+                </form>
 
-            <h2>Chat iKOEH</h2>
-            <?php
-            $chat_key = get_option(Ikoeh_Connect_Chat::OPTION_API_KEY, '');
-            $chat_key_status = '' !== $chat_key ? ('Chave configurada (termina em ...' . esc_html(substr($chat_key, -4)) . ')') : 'Nenhuma chave configurada';
-            $chat_model = get_option(Ikoeh_Connect_Chat::OPTION_MODEL, '') ?: Ikoeh_Connect_Chat::DEFAULT_MODEL;
-            ?>
-            <form method="post">
-                <?php wp_nonce_field('ikoeh_chat_settings_action', 'ikoeh_chat_settings_nonce'); ?>
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row">Chave de API (Anthropic)</th>
-                        <td>
-                            <p><?php echo esc_html($chat_key_status); ?></p>
-                            <input type="password" name="ikoeh_chat_api_key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="ikoeh-chat-screenshot-key">Chave de API do Google (opcional)</label></th>
-                        <td>
-                            <input type="password" name="ikoeh_chat_screenshot_api_key" id="ikoeh-chat-screenshot-key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
-                            <p class="description">Nao obrigatoria -- a clonagem de site funciona sem isso. Configure uma chave gratuita do Google Cloud (API PageSpeed Insights habilitada) so se precisar de um limite maior de requisicoes.</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="ikoeh-chat-model">Modelo</label></th>
-                        <td>
-                            <select name="ikoeh_chat_model" id="ikoeh-chat-model">
-                                <?php foreach (['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] as $model_option) : ?>
-                                    <option value="<?php echo esc_attr($model_option); ?>" <?php selected($chat_model, $model_option); ?>><?php echo esc_html($model_option); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </td>
-                    </tr>
-                </table>
-                <p class="submit">
-                    <button type="submit" name="ikoeh_chat_save_settings" class="button button-primary">Salvar configurações do chat</button>
-                </p>
-            </form>
+                <h2>Conversa</h2>
+                <?php Ikoeh_Connect_Chat_Admin::render_chat_ui(); ?>
+            <?php endif; ?>
         </div>
+        <?php if ('connections' === $active_tab) : ?>
         <script>
         (function () {
             var nameSelect = document.getElementById('ikoeh-connect-name');
@@ -343,6 +358,7 @@ class Ikoeh_Connect_Admin {
             });
         })();
         </script>
+        <?php endif; ?>
         <?php
     }
 }

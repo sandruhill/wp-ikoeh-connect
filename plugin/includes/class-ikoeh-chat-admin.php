@@ -5,18 +5,13 @@ if (!defined('ABSPATH')) {
 
 class Ikoeh_Connect_Chat_Admin {
 
-    public static function register_menu() {
-        add_submenu_page(
-            'options-general.php',
-            'Chat iKOEH',
-            'iKOEH Chat',
-            'manage_options',
-            'ikoeh-connect-chat',
-            [__CLASS__, 'render_page']
-        );
-    }
-
-    public static function render_page() {
+    /**
+     * Renders the chat conversation UI (message history + input + send
+     * button) or a "configure a key first" notice. Called directly from
+     * class-ikoeh-admin.php's Chat tab -- this class no longer registers
+     * its own wp-admin menu page.
+     */
+    public static function render_chat_ui() {
         if (!current_user_can('manage_options')) {
             return;
         }
@@ -24,13 +19,7 @@ class Ikoeh_Connect_Chat_Admin {
         $api_key_configured = '' !== get_option(Ikoeh_Connect_Chat::OPTION_API_KEY, '');
 
         if (!$api_key_configured) {
-            $settings_url = admin_url('options-general.php?page=ikoeh-connect');
-            ?>
-            <div class="wrap">
-                <h1>Chat iKOEH</h1>
-                <p>Configure uma chave de API da Anthropic em <a href="<?php echo esc_url($settings_url); ?>">Ajustes &gt; iKOEH Connect</a> antes de usar o chat.</p>
-            </div>
-            <?php
+            echo '<p>Configure uma chave de API da Anthropic acima antes de usar o chat.</p>';
             return;
         }
 
@@ -48,15 +37,12 @@ class Ikoeh_Connect_Chat_Admin {
             'history' => Ikoeh_Connect_Chat::get_history(),
         ]);
         ?>
-        <div class="wrap">
-            <h1>Chat iKOEH</h1>
-            <div id="ikoeh-chat-messages" style="max-width:700px;border:1px solid #ccd0d4;border-radius:4px;padding:16px;margin-bottom:12px;min-height:300px;max-height:500px;overflow-y:auto;background:#fff;"></div>
-            <div style="max-width:700px;display:flex;gap:8px;">
-                <textarea id="ikoeh-chat-input" rows="2" style="flex:1;" placeholder="Digite sua mensagem..."></textarea>
-                <button type="button" id="ikoeh-chat-send" class="button button-primary">Enviar</button>
-            </div>
-            <p id="ikoeh-chat-status" style="color:#d63638;"></p>
+        <div id="ikoeh-chat-messages" style="max-width:700px;border:1px solid #ccd0d4;border-radius:4px;padding:16px;margin-bottom:12px;min-height:300px;max-height:500px;overflow-y:auto;background:#fff;"></div>
+        <div style="max-width:700px;display:flex;gap:8px;">
+            <textarea id="ikoeh-chat-input" rows="2" style="flex:1;" placeholder="Digite sua mensagem..."></textarea>
+            <button type="button" id="ikoeh-chat-send" class="button button-primary">Enviar</button>
         </div>
+        <p id="ikoeh-chat-status" style="color:#d63638;"></p>
         <?php
     }
 }

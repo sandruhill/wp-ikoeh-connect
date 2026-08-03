@@ -67,7 +67,6 @@ add_filter('cron_schedules', ['Ikoeh_Connect_Clone_Store', 'register_cron_interv
 
 add_action('admin_menu', ['Ikoeh_Connect_Admin', 'register_menu']);
 add_action('admin_menu', ['Ikoeh_Connect_Gutenberg_Admin', 'register_menu']);
-add_action('admin_menu', ['Ikoeh_Connect_Chat_Admin', 'register_menu']);
 add_action('init', ['Ikoeh_Connect_Admin', 'register_ajax']);
 add_action('init', ['Ikoeh_Connect_Chat', 'register_ajax']);
 
