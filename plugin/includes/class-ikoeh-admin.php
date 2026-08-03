@@ -124,6 +124,11 @@ class Ikoeh_Connect_Admin {
             if ('' !== $new_key) {
                 update_option(Ikoeh_Connect_Chat::OPTION_API_KEY, $new_key);
             }
+
+            $new_screenshot_key = isset($_POST['ikoeh_chat_screenshot_api_key']) ? trim(wp_unslash($_POST['ikoeh_chat_screenshot_api_key'])) : '';
+            if ('' !== $new_screenshot_key) {
+                update_option(Ikoeh_Connect_Site_Inspector::OPTION_SCREENSHOT_API_KEY, $new_screenshot_key);
+            }
             $notice = ['type' => 'success', 'text' => 'Configurações do chat salvas.'];
         }
 
@@ -271,6 +276,10 @@ class Ikoeh_Connect_Admin {
                             <p><?php echo esc_html($chat_key_status); ?></p>
                             <input type="password" name="ikoeh_chat_api_key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
                         </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="ikoeh-chat-screenshot-key">Chave de API de screenshot (urlbox.io)</label></th>
+                        <td><input type="password" name="ikoeh_chat_screenshot_api_key" id="ikoeh-chat-screenshot-key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off"></td>
                     </tr>
                     <tr>
                         <th scope="row"><label for="ikoeh-chat-model">Modelo</label></th>

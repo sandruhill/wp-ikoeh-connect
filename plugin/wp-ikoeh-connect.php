@@ -21,6 +21,7 @@ define('IKOEH_CONNECT_REST_NAMESPACE', 'ikoeh-connect/v1');
 
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-auth.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-setup.php';
+require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-site-inspector.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-admin.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-chat.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-chat-admin.php';
