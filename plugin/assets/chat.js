@@ -106,7 +106,7 @@
                 if (TERMINAL_STATUSES.indexOf(job.status) === -1) {
                     setTimeout(pollCloneStatus, POLL_INTERVAL_MS);
                 } else {
-                    renderHistory(window.ikoehChat.history || []);
+                    renderHistory(json.data.history || []);
                 }
             })
             .catch(function () {

@@ -178,10 +178,10 @@ class Ikoeh_Connect_Chat {
         }
 
         if (!$job) {
-            wp_send_json_success(['job' => null]);
+            wp_send_json_success(['job' => null, 'history' => Ikoeh_Connect_Chat::get_history()]);
         }
 
-        wp_send_json_success(['job' => Ikoeh_Connect_Clone_Store::shape_job($job)]);
+        wp_send_json_success(['job' => Ikoeh_Connect_Clone_Store::shape_job($job), 'history' => Ikoeh_Connect_Chat::get_history()]);
     }
 
     public static function ajax_undo() {
