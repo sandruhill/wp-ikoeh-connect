@@ -22,7 +22,7 @@ class Ikoeh_Connect_Site_Inspector {
      * model does not need to clone a page's content and structure.
      */
     public static function fetch_html_summary($url) {
-        $response = wp_remote_get($url, ['timeout' => 20, 'redirection' => 5]);
+        $response = wp_safe_remote_get($url, ['timeout' => 20, 'redirection' => 5]);
         if (is_wp_error($response)) {
             return $response;
         }
