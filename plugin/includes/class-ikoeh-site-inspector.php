@@ -88,8 +88,11 @@ class Ikoeh_Connect_Site_Inspector {
             return new WP_Error('ikoeh_connect_no_screenshot_key', 'Configure uma chave de API de screenshot (urlbox.io) primeiro.', ['status' => 400]);
         }
 
+        // add_query_arg()/build_query() does NOT urlencode values, so a $url
+        // with its own query string (UTM params etc.) would otherwise inject
+        // extra top-level params into the outer request and get truncated.
         $endpoint = add_query_arg([
-            'url' => $url,
+            'url' => rawurlencode($url),
             'format' => 'png',
             'full_page' => 'true',
         ], self::URLBOX_API_URL);
