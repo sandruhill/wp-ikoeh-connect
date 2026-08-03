@@ -6,14 +6,16 @@ if (!defined('ABSPATH')) {
 /**
  * Fetches a compact text summary and a screenshot of any URL (the external
  * reference site being cloned, or the customer's own freshly-published page,
- * for comparison). v1 supports a single screenshot vendor, urlbox.io, using
- * a per-site API key the customer configures themselves (same write-only,
- * masked pattern as the existing Anthropic key).
+ * for comparison). Screenshots come from Google's PageSpeed Insights API,
+ * free and requiring no signup for basic use (an optional Google API key
+ * just raises the rate limit) -- chosen specifically to avoid requiring
+ * every end customer to create a third-party paid account before their
+ * first clone.
  */
 class Ikoeh_Connect_Site_Inspector {
 
     const OPTION_SCREENSHOT_API_KEY = 'ikoeh_chat_screenshot_api_key';
-    const URLBOX_API_URL = 'https://api.urlbox.io/v1/render';
+    const PAGESPEED_API_URL = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
     const MAX_SUMMARY_CHARS = 6000;
 
     /**
@@ -82,35 +84,49 @@ class Ikoeh_Connect_Site_Inspector {
         return mb_substr($summary, 0, self::MAX_SUMMARY_CHARS);
     }
 
+    /**
+     * Uses Google's PageSpeed Insights API to obtain a screenshot, not a
+     * dedicated screenshot vendor: PageSpeed Insights is free and requires
+     * no signup for basic use (an optional Google API key just raises the
+     * rate limit), which matters a lot for a product aimed at non-technical
+     * end customers who should not have to create a third-party account
+     * before cloning their first page. This is an unofficial repurposing of
+     * a performance-auditing tool (the screenshot is a side effect of the
+     * Lighthouse run PageSpeed Insights performs), not a purpose-built
+     * screenshot API, so it is slower (a full Lighthouse run, not just a
+     * render) and offers less control (no explicit full-page/format options)
+     * than a dedicated vendor would -- accepted as the right tradeoff here.
+     */
     public static function fetch_screenshot_bytes($url) {
         $api_key = get_option(self::OPTION_SCREENSHOT_API_KEY, '');
-        if ('' === $api_key) {
-            return new WP_Error('ikoeh_connect_no_screenshot_key', 'Configure uma chave de API de screenshot (urlbox.io) primeiro.', ['status' => 400]);
+
+        $args = ['url' => $url, 'category' => 'performance'];
+        if ('' !== $api_key) {
+            $args['key'] = $api_key;
         }
 
         // add_query_arg()/build_query() does NOT urlencode values, so a $url
         // with its own query string (UTM params etc.) would otherwise inject
         // extra top-level params into the outer request and get truncated.
-        $endpoint = add_query_arg([
-            'url' => rawurlencode($url),
-            'format' => 'png',
-            'full_page' => 'true',
-        ], self::URLBOX_API_URL);
+        $endpoint = add_query_arg(array_map('rawurlencode', $args), self::PAGESPEED_API_URL);
 
-        $response = wp_remote_get($endpoint, [
-            'timeout' => 30,
-            'headers' => ['Authorization' => 'Bearer ' . $api_key],
-        ]);
-
+        $response = wp_remote_get($endpoint, ['timeout' => 60]);
         if (is_wp_error($response)) {
             return $response;
         }
 
         $code = wp_remote_retrieve_response_code($response);
         if (200 !== $code) {
-            return new WP_Error('ikoeh_connect_screenshot_failed', "Screenshot service returned HTTP {$code} for {$url}.", ['status' => 502]);
+            return new WP_Error('ikoeh_connect_screenshot_failed', "PageSpeed Insights returned HTTP {$code} for {$url}.", ['status' => 502]);
         }
 
-        return wp_remote_retrieve_body($response);
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+        $data_uri = $body['lighthouseResult']['audits']['final-screenshot']['details']['data'] ?? '';
+
+        if ('' === $data_uri || !preg_match('/^data:image\/[a-zA-Z]+;base64,(.+)$/', $data_uri, $matches)) {
+            return new WP_Error('ikoeh_connect_screenshot_missing', "PageSpeed Insights did not return a screenshot for {$url}.", ['status' => 502]);
+        }
+
+        return base64_decode($matches[1]);
     }
 }

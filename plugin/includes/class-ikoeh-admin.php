@@ -278,8 +278,11 @@ class Ikoeh_Connect_Admin {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="ikoeh-chat-screenshot-key">Chave de API de screenshot (urlbox.io)</label></th>
-                        <td><input type="password" name="ikoeh_chat_screenshot_api_key" id="ikoeh-chat-screenshot-key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off"></td>
+                        <th scope="row"><label for="ikoeh-chat-screenshot-key">Chave de API do Google (opcional)</label></th>
+                        <td>
+                            <input type="password" name="ikoeh_chat_screenshot_api_key" id="ikoeh-chat-screenshot-key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
+                            <p class="description">Nao obrigatoria -- a clonagem de site funciona sem isso. Configure uma chave gratuita do Google Cloud (API PageSpeed Insights habilitada) so se precisar de um limite maior de requisicoes.</p>
+                        </td>
                     </tr>
                     <tr>
                         <th scope="row"><label for="ikoeh-chat-model">Modelo</label></th>
