@@ -38,6 +38,8 @@ require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-posts.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-admin-access.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-gutenberg-store.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-clone-store.php';
+require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-chat-tools.php';
+require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-chat-clone-runner.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-gutenberg.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-gutenberg-admin.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-skills.php';
@@ -57,6 +59,7 @@ add_action('init', ['Ikoeh_Connect_Clone_Store', 'register_post_type']);
 add_action('init', ['Ikoeh_Connect_Gutenberg_Store', 'schedule_cleanup']);
 add_action('init', ['Ikoeh_Connect_Clone_Store', 'schedule_tick']);
 add_action('ikoeh_gb_cleanup', ['Ikoeh_Connect_Gutenberg_Store', 'cleanup']);
+add_action('ikoeh_clone_job_tick', ['Ikoeh_Connect_Chat_Clone_Runner', 'run_tick']);
 register_deactivation_hook(__FILE__, ['Ikoeh_Connect_Gutenberg_Store', 'unschedule_cleanup']);
 register_deactivation_hook(__FILE__, ['Ikoeh_Connect_Clone_Store', 'unschedule_tick']);
 
