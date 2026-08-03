@@ -22,6 +22,8 @@ class Ikoeh_Connect_Chat {
 
     public static function register_ajax() {
         add_action('wp_ajax_ikoeh_chat_send', [__CLASS__, 'ajax_send']);
+        add_action('wp_ajax_ikoeh_chat_clone_status', [__CLASS__, 'ajax_clone_status']);
+        add_action('wp_ajax_ikoeh_chat_undo', [__CLASS__, 'ajax_undo']);
     }
 
     public static function get_history() {
@@ -156,5 +158,48 @@ class Ikoeh_Connect_Chat {
         $history = self::save_history($history);
 
         wp_send_json_success(['history' => $history]);
+    }
+
+    public static function ajax_clone_status() {
+        check_ajax_referer('ikoeh_chat_send', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Sem permissão.']);
+        }
+
+        $job = Ikoeh_Connect_Clone_Store::get_oldest_non_terminal_job();
+        if (!$job) {
+            $recent = get_posts([
+                'post_type' => Ikoeh_Connect_Clone_Store::POST_TYPE,
+                'posts_per_page' => 1,
+                'orderby' => 'ID',
+                'order' => 'DESC',
+            ]);
+            $job = $recent[0] ?? null;
+        }
+
+        if (!$job) {
+            wp_send_json_success(['job' => null]);
+        }
+
+        wp_send_json_success(['job' => Ikoeh_Connect_Clone_Store::shape_job($job)]);
+    }
+
+    public static function ajax_undo() {
+        check_ajax_referer('ikoeh_chat_send', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Sem permissão.']);
+        }
+
+        $post_id = isset($_POST['post_id']) ? (int) $_POST['post_id'] : 0;
+        if (!$post_id) {
+            wp_send_json_error(['message' => 'post_id ausente.']);
+        }
+
+        $result = Ikoeh_Connect_Chat_Snapshots::undo_last_change($post_id);
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        wp_send_json_success(['undone' => true]);
     }
 }
