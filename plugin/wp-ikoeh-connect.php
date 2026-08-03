@@ -46,6 +46,7 @@ require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-design.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-system-path.php';
 require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-system-installer.php';
 require_once IKOEH_CONNECT_DIR . 'includes/rest/class-ikoeh-rest-system-files.php';
+require_once IKOEH_CONNECT_DIR . 'includes/class-ikoeh-chat-snapshots.php';
 
 add_action('init', ['Ikoeh_Connect_Auth', 'maybe_migrate']);
 add_action('init', ['Ikoeh_Connect_System_Installer', 'ensure_sandbox']);
