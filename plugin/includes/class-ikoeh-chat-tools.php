@@ -150,7 +150,7 @@ class Ikoeh_Connect_Chat_Tools {
             return ['error' => 'Missing image_url.'];
         }
 
-        $response = wp_remote_get($image_url, ['timeout' => 20]);
+        $response = wp_safe_remote_get($image_url, ['timeout' => 20]);
         if (is_wp_error($response)) {
             return ['error' => $response->get_error_message()];
         }
