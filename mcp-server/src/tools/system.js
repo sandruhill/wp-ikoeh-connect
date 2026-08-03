@@ -2,34 +2,6 @@ import { z } from "zod";
 
 export function registerSystemTools(server, client) {
   server.registerTool(
-    "wp_execute_php",
-    {
-      title: "Execute PHP",
-      description:
-        "Execute arbitrary PHP code on the WordPress server with the full WordPress environment loaded ($wpdb, all core functions, active plugins). Do NOT include <?php tags. Use 'return $value;' to get a value back. Never call exit()/die() -- that kills the whole PHP process. There is a 30-second execution time limit.",
-      inputSchema: { code: z.string().min(1) },
-    },
-    async ({ code }) => {
-      const data = await client.request("POST", "/system-execute-php", { json: { code } });
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-    }
-  );
-
-  server.registerTool(
-    "wp_run_wp_cli",
-    {
-      title: "Run WP-CLI Command",
-      description:
-        "Run a WP-CLI command against this site (e.g. 'plugin list', 'theme activate twentytwentyfour'). Do not include the leading 'wp'. Returns stdout/stderr/exit_code. Fails clearly if proc_open/exec are disabled by the host (common on shared hosting).",
-      inputSchema: { command: z.string().min(1) },
-    },
-    async ({ command }) => {
-      const data = await client.request("POST", "/system-wp-cli", { json: { command } });
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-    }
-  );
-
-  server.registerTool(
     "wp_read_system_file",
     {
       title: "Read System File",
