@@ -142,24 +142,37 @@ class Ikoeh_Connect_Rest_Elementor {
             return new WP_Error('ikoeh_connect_invalid_params', 'Body must include an "elements" array.', ['status' => 400]);
         }
 
-        $normalized = self::normalize_elements($params['elements']);
-        $encoded = wp_json_encode($normalized);
-
-        // wp_slash() before update_post_meta(): WordPress core runs
-        // wp_unslash() internally and assumes slashed input, so real
-        // backslashes in the encoded JSON (\n, \" inside string values) get
-        // silently stripped without this, corrupting the stored data.
-        update_post_meta($id, '_elementor_data', wp_slash($encoded));
-        update_post_meta($id, '_elementor_edit_mode', 'builder');
-
-        // Elementor caches rendered output in three places. Clearing only
-        // some of them leaves the page serving stale content even though
-        // _elementor_data is correct.
-        delete_post_meta($id, '_elementor_css');
-        delete_post_meta($id, '_elementor_page_assets');
-        delete_post_meta($id, '_elementor_element_cache');
+        $result = self::write_content($id, $params['elements']);
+        if (is_wp_error($result)) {
+            return $result;
+        }
 
         return new WP_REST_Response(['updated' => $id], 200);
+    }
+
+    /**
+     * Shared write path for both the REST route above and the chat-tool
+     * clone feature: normalizes the element tree, wp_slash()es it before
+     * update_post_meta() (WordPress core runs wp_unslash() internally, so
+     * real backslashes in the encoded JSON get silently stripped without
+     * this), and clears all three Elementor render-cache keys together.
+     */
+    public static function write_content($post_id, array $elements) {
+        if (!get_post($post_id)) {
+            return new WP_Error('ikoeh_connect_not_found', 'Post not found.', ['status' => 404]);
+        }
+
+        $normalized = self::normalize_elements($elements);
+        $encoded = wp_json_encode($normalized);
+
+        update_post_meta($post_id, '_elementor_data', wp_slash($encoded));
+        update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+
+        delete_post_meta($post_id, '_elementor_css');
+        delete_post_meta($post_id, '_elementor_page_assets');
+        delete_post_meta($post_id, '_elementor_element_cache');
+
+        return true;
     }
 
     /**
@@ -177,7 +190,7 @@ class Ikoeh_Connect_Rest_Elementor {
      *   getBoundingClientRect() in production: a 2-column grid whose content
      *   needed ~480px was rendering at 963px until this was set to size:1.
      */
-    private static function normalize_elements(array $elements, $depth = 0) {
+    public static function normalize_elements(array $elements, $depth = 0) {
         foreach ($elements as &$element) {
             if (!isset($element['elements']) || !is_array($element['elements'])) {
                 $element['elements'] = [];

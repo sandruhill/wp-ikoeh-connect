@@ -24,12 +24,29 @@ class Ikoeh_Connect_Rest_Media {
             return new WP_Error('ikoeh_connect_empty_body', 'No image bytes provided.', ['status' => 400]);
         }
 
+        $attachment_id = self::sideload_bytes($filename, $body);
+        if (is_wp_error($attachment_id)) {
+            return $attachment_id;
+        }
+
+        return new WP_REST_Response([
+            'id'  => $attachment_id,
+            'url' => wp_get_attachment_url($attachment_id),
+        ], 201);
+    }
+
+    /**
+     * Shared sideload path for both the REST route above and the chat-tool
+     * clone feature (which downloads a reference-site image over HTTP first,
+     * then calls this with the downloaded bytes).
+     */
+    public static function sideload_bytes($filename, $bytes) {
         require_once ABSPATH . 'wp-admin/includes/image.php';
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/media.php';
 
         $tmp = wp_tempnam(sanitize_file_name($filename));
-        file_put_contents($tmp, $body);
+        file_put_contents($tmp, $bytes);
 
         $file_array = [
             'name'     => sanitize_file_name($filename),
@@ -48,9 +65,6 @@ class Ikoeh_Connect_Rest_Media {
             return new WP_Error('ikoeh_connect_upload_failed', $attachment_id->get_error_message(), ['status' => 400]);
         }
 
-        return new WP_REST_Response([
-            'id'  => $attachment_id,
-            'url' => wp_get_attachment_url($attachment_id),
-        ], 201);
+        return $attachment_id;
     }
 }
