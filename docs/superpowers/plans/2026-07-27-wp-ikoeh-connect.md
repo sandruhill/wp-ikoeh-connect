@@ -130,6 +130,7 @@ if (!defined('ABSPATH')) {
 class Ikoeh_Connect_Auth {
 
     const TOKEN_HASH_OPTION = 'ikoeh_connect_token_hash';
+    const LAST_USED_OPTION = 'ikoeh_connect_last_used_at';
 
     public static function generate_token() {
         return bin2hex(random_bytes(32));
@@ -148,7 +149,13 @@ class Ikoeh_Connect_Auth {
     }
 
     public static function verify_request(WP_REST_Request $request) {
-        if (!is_ssl()) {
+        // IKOEH_CONNECT_SKIP_HTTPS_CHECK exists only for the isolated local/CI
+        // Docker environment (docker-compose.yml), which deliberately runs
+        // plain HTTP with no TLS termination. It is never defined on a real
+        // deployment, so HTTPS stays mandatory everywhere else.
+        $skip_https_check = defined('IKOEH_CONNECT_SKIP_HTTPS_CHECK') && IKOEH_CONNECT_SKIP_HTTPS_CHECK;
+
+        if (!is_ssl() && !$skip_https_check) {
             return new WP_Error('ikoeh_connect_https_required', 'HTTPS required.', ['status' => 400]);
         }
 
@@ -164,7 +171,16 @@ class Ikoeh_Connect_Auth {
             return new WP_Error('ikoeh_connect_unauthorized', 'Invalid token.', ['status' => 401]);
         }
 
+        // Records real usage, not just that a token exists, so the admin
+        // screen can show "last activity" instead of only "token configured".
+        update_option(self::LAST_USED_OPTION, time(), false);
+
         return true;
+    }
+
+    public static function last_used_at() {
+        $value = get_option(self::LAST_USED_OPTION, 0);
+        return $value ? (int) $value : null;
     }
 
     public static function setup_rate_limit_ok() {
@@ -322,14 +338,12 @@ if (!defined('ABSPATH')) {
 class Ikoeh_Connect_Admin {
 
     public static function register_menu() {
-        add_menu_page(
+        add_options_page(
             'WP iKOEH Connect',
             'iKOEH Connect',
             'manage_options',
             'ikoeh-connect',
-            [__CLASS__, 'render_page'],
-            'dashicons-admin-plugins',
-            80
+            [__CLASS__, 'render_page']
         );
     }
 
@@ -350,6 +364,7 @@ class Ikoeh_Connect_Admin {
         }
 
         $has_token = Ikoeh_Connect_Auth::has_token();
+        $last_used = Ikoeh_Connect_Auth::last_used_at();
         ?>
         <div class="wrap">
             <h1>WP iKOEH Connect</h1>
@@ -362,18 +377,38 @@ class Ikoeh_Connect_Admin {
                 </div>
             <?php endif; ?>
 
-            <table class="form-table" role="presentation">
-                <tr>
-                    <th scope="row">Status da conexão</th>
-                    <td>
-                        <?php if ($has_token) : ?>
-                            <span style="color:#00a32a;">&#9679;</span> Token configurado
-                        <?php else : ?>
-                            <span style="color:#d63638;">&#9679;</span> Nenhum token configurado
-                        <?php endif; ?>
-                    </td>
-                </tr>
-            </table>
+            <div style="
+                background: <?php echo $has_token ? '#edfaef' : '#fcf0f1'; ?>;
+                border-left: 4px solid <?php echo $has_token ? '#00a32a' : '#d63638'; ?>;
+                padding: 1px 12px;
+                margin: 16px 0;
+            ">
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">Status da conexão</th>
+                        <td>
+                            <?php if ($has_token) : ?>
+                                <span style="color:#00a32a;">&#9679;</span> Token configurado
+                            <?php else : ?>
+                                <span style="color:#d63638;">&#9679;</span> Nenhum token configurado
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php if ($has_token) : ?>
+                        <tr>
+                            <th scope="row">Última atividade</th>
+                            <td>
+                                <?php if ($last_used) : ?>
+                                    Há <?php echo esc_html(human_time_diff($last_used, time())); ?>
+                                    (<?php echo esc_html(date_i18n('d/m/Y H:i', $last_used)); ?>)
+                                <?php else : ?>
+                                    Nenhuma chamada recebida ainda
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
+                </table>
+            </div>
 
             <form method="post">
                 <?php wp_nonce_field('ikoeh_connect_regenerate_action', 'ikoeh_connect_nonce'); ?>
@@ -1747,7 +1782,7 @@ services:
       WORDPRESS_DB_PASSWORD: wordpress
       WORDPRESS_DB_NAME: wordpress
       WORDPRESS_DEBUG: "1"
-      WORDPRESS_CONFIG_EXTRA: "define('IKOEH_CONNECT_SETUP_KEY', 'local-dev-not-a-real-secret');"
+      WORDPRESS_CONFIG_EXTRA: "define('IKOEH_CONNECT_SETUP_KEY', 'local-dev-not-a-real-secret'); define('IKOEH_CONNECT_SKIP_HTTPS_CHECK', true);"
     volumes:
       - wp_data:/var/www/html
       - ./plugin:/var/www/html/wp-content/mu-plugins
@@ -1757,9 +1792,16 @@ services:
     depends_on:
       - wordpress
       - db
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      # Must match the `wordpress` service exactly: whichever container boots
+      # first generates wp-config.php, and it is not regenerated afterward.
+      WORDPRESS_CONFIG_EXTRA: "define('IKOEH_CONNECT_SETUP_KEY', 'local-dev-not-a-real-secret'); define('IKOEH_CONNECT_SKIP_HTTPS_CHECK', true);"
     volumes:
       - wp_data:/var/www/html
-    entrypoint: ["tail", "-f", "/dev/null"]
 
 volumes:
   db_data:
@@ -1778,7 +1820,12 @@ Expected: both `db` and `wordpress` containers report `Started`
 Run: `for i in $(seq 1 30); do code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-login.php); [ "$code" != "000" ] && echo "up: $code" && break; sleep 2; done`
 Expected: prints `up: 200` (or a redirect code) within the 30 tries
 
-- [ ] **Step 4: Install WordPress core non-interactively**
+- [ ] **Step 4: Wait for MySQL to accept connections**
+
+Run: `for i in $(seq 1 30); do docker compose exec -T db mysqladmin ping -uwordpress -pwordpress --silent && break; sleep 2; done`
+Expected: loop exits once MySQL responds to ping, well before the 30-try limit. The `wordpress` container responding to HTTP (Step 3) does not guarantee MySQL has finished initializing on first boot, this is a separate wait.
+
+- [ ] **Step 5: Install WordPress core non-interactively**
 
 ```bash
 docker compose run --rm wp-cli wp core install \
@@ -1792,12 +1839,21 @@ docker compose run --rm wp-cli wp core install \
 
 Expected: `Success: WordPress installed successfully.`
 
-- [ ] **Step 5: Verify the plugin loaded and rejects unauthenticated requests**
+- [ ] **Step 6: Set pretty permalinks and flush rewrite rules**
+
+```bash
+docker compose run --rm wp-cli wp rewrite structure '/%postname%/' --path=/var/www/html
+docker compose run --rm wp-cli wp rewrite flush --path=/var/www/html
+```
+
+Expected: both commands exit 0. Without this, WordPress serves `/wp-json/...` requests with a 301 redirect to a trailing-slash URL instead of resolving them directly, which breaks plain `curl` checks that do not follow redirects.
+
+- [ ] **Step 7: Verify the plugin loaded and rejects unauthenticated requests**
 
 Run: `curl -sS -o /dev/null -w "%{http_code}\n" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info`
 Expected: `401`
 
-- [ ] **Step 6: Verify the full setup and authenticated call work locally**
+- [ ] **Step 8: Verify the full setup and authenticated call work locally**
 
 ```bash
 TOKEN=$(curl -sS -X POST http://localhost:8080/wp-json/ikoeh-connect/v1/setup \
@@ -1807,12 +1863,12 @@ curl -sS http://localhost:8080/wp-json/ikoeh-connect/v1/site-info -H "Authorizat
 
 Expected: JSON with `wp_version`, `php_version`, `active_theme`, `active_plugins`.
 
-- [ ] **Step 7: Tear down**
+- [ ] **Step 9: Tear down**
 
 Run: `docker compose down -v`
 Expected: containers and volumes removed, exits 0
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add docker-compose.yml
@@ -1880,15 +1936,35 @@ jobs:
           done
           echo "WordPress did not come up in time"
           exit 1
+      - name: Wait for MySQL to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose exec -T db mysqladmin ping -uwordpress -pwordpress --silent; then
+              echo "MySQL is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL did not become ready in time"
+          exit 1
       - name: Install WordPress core
         run: |
-          docker compose run --rm wp-cli wp core install \
-            --url=http://localhost:8080 \
-            --title="iKOEH Connect CI" \
-            --admin_user=admin \
-            --admin_password=admin \
-            --admin_email=ci@example.com \
-            --path=/var/www/html
+          for i in $(seq 1 5); do
+            docker compose run --rm wp-cli wp core install \
+              --url=http://localhost:8080 \
+              --title="iKOEH Connect CI" \
+              --admin_user=admin \
+              --admin_password=admin \
+              --admin_email=ci@example.com \
+              --path=/var/www/html && exit 0
+            echo "Retrying wp core install..."
+            sleep 3
+          done
+          exit 1
+      - name: Set pretty permalinks and flush rewrite rules
+        run: |
+          docker compose run --rm wp-cli wp rewrite structure '/%postname%/' --path=/var/www/html
+          docker compose run --rm wp-cli wp rewrite flush --path=/var/www/html
       - name: Verify REST API rejects unauthenticated requests
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info)

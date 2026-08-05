@@ -1,0 +1,243 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  php-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint all plugin PHP files
+        run: find plugin -name "*.php" -print -exec php -l {} \;
+
+  mcp-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        working-directory: mcp-server
+        run: npm ci
+      - name: Syntax-check all source files
+        working-directory: mcp-server
+        run: find src -name "*.js" -print -exec node --check {} \;
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [php-lint, mcp-server]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start isolated WordPress environment
+        run: docker compose up -d
+      - name: Wait for WordPress to respond
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/wp-login.php || true)
+            if [ "$code" != "000" ]; then
+              echo "WordPress is up (HTTP $code)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "WordPress did not come up in time"
+          exit 1
+      - name: Wait for MySQL to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose exec -T db mysqladmin ping -uwordpress -pwordpress --silent; then
+              echo "MySQL is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL did not become ready in time"
+          exit 1
+      - name: Install WordPress core
+        run: |
+          for i in $(seq 1 5); do
+            docker compose run --rm wp-cli wp core install \
+              --url=http://localhost:8080 \
+              --title="iKOEH Connect CI" \
+              --admin_user=admin \
+              --admin_password=admin \
+              --admin_email=ci@example.com \
+              --path=/var/www/html && exit 0
+            echo "Retrying wp core install..."
+            sleep 3
+          done
+          exit 1
+      - name: Set pretty permalinks and flush rewrite rules
+        run: |
+          docker compose run --rm wp-cli wp rewrite structure '/%postname%/' --path=/var/www/html
+          docker compose run --rm wp-cli wp rewrite flush --path=/var/www/html
+      - name: Fix wp-content permissions for the wp-cli container
+        # The `wordpress` and `wp-cli` images run their processes as different
+        # UIDs by default. wp-content is created/owned by whichever container
+        # touches it first (the `wordpress` service, on boot), so the wp-cli
+        # container's plugin-install step fails with "Could not create
+        # directory wp-content/upgrade" without this. Widening perms is fine
+        # here: this is a throwaway CI container, not production.
+        run: docker compose exec -T -u root wordpress chmod -R 777 wp-content
+      - name: Install and activate Elementor
+        run: docker compose run --rm wp-cli wp plugin install elementor --activate --path=/var/www/html
+      - name: Verify REST API rejects unauthenticated requests
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info)
+          test "$code" = "401"
+      - name: Claim setup token and verify authenticated site-info
+        run: |
+          token=$(curl -sS -X POST http://localhost:8080/wp-json/ikoeh-connect/v1/setup \
+            -H "X-Setup-Key: local-dev-not-a-real-secret" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+          echo "TOKEN=$token" >> "$GITHUB_ENV"
+          code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/site-info \
+            -H "Authorization: Bearer $token")
+          test "$code" = "200"
+      - name: Verify Elementor widgets endpoint returns data
+        run: |
+          count=$(curl -sS http://localhost:8080/wp-json/ikoeh-connect/v1/elementor-widgets \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          test "$count" -gt "0"
+      - name: Verify Elementor templates endpoint responds 200 on a fresh install
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/elementor-templates \
+            -H "Authorization: Bearer $TOKEN")
+          test "$code" = "200"
+      - name: Verify Elementor content write normalizes and clears cache
+        run: |
+          POST_ID=$(docker compose run --rm wp-cli wp post create --post_type=page \
+            --post_title="CI Elementor Test" --post_status=publish --porcelain --path=/var/www/html)
+          curl -sS -X PUT "http://localhost:8080/wp-json/ikoeh-connect/v1/elementor-content?id=$POST_ID" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"elements":[{"id":"abc123","elType":"container","settings":[],"elements":[]}]}'
+          width=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/elementor-content?id=$POST_ID" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['elements'][0]['settings']['content_width'])")
+          test "$width" = "full"
+          css_meta=$(docker compose run --rm wp-cli wp post meta get "$POST_ID" _elementor_css --path=/var/www/html || true)
+          test -z "$css_meta"
+      - name: Verify theme-info reports a block theme
+        run: |
+          is_block=$(curl -sS http://localhost:8080/wp-json/ikoeh-connect/v1/theme-info \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['is_block_theme'])")
+          test "$is_block" = "True"
+      - name: Verify theme-json round-trips a written value
+        run: |
+          curl -sS http://localhost:8080/wp-json/ikoeh-connect/v1/theme-json -H "Authorization: Bearer $TOKEN" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); d['version']=3; print(json.dumps(d))" > /tmp/theme.json
+          curl -sS -X PUT http://localhost:8080/wp-json/ikoeh-connect/v1/theme-json \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data @/tmp/theme.json
+          version=$(curl -sS http://localhost:8080/wp-json/ikoeh-connect/v1/theme-json \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['version'])")
+          test "$version" = "3"
+      - name: Verify the Setup connection has all scopes (plugins list succeeds)
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/plugins \
+            -H "Authorization: Bearer $TOKEN")
+          test "$code" = "200"
+      - name: Verify an invalid token is rejected with 401 on a scoped endpoint
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" http://localhost:8080/wp-json/ikoeh-connect/v1/plugins \
+            -H "Authorization: Bearer not-a-real-token")
+          test "$code" = "401"
+      - name: Verify Gutenberg batch create/read/enable-finalization round-trips
+        run: |
+          POST_ID=$(docker compose run --rm wp-cli wp post create --post_type=page \
+            --post_title="CI Gutenberg Test" --post_status=publish --post_content="<!-- wp:paragraph --><p>original</p><!-- /wp:paragraph -->" \
+            --porcelain --path=/var/www/html)
+          BATCH_ID=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-batch" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"label":"CI batch","agent_note":"ci"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['batch_id'])")
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-item" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d "{\"batch_id\":$BATCH_ID,\"target_id\":$POST_ID,\"target_type\":\"page\",\"operation\":\"update\",\"block_spec\":[{\"name\":\"core/paragraph\",\"attributes\":{\"content\":\"updated\"}}]}"
+          status=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-enable-finalization" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d "{\"batch_id\":$BATCH_ID}" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+          test "$status" = "ready"
+      - name: Verify Gutenberg unauthenticated request is rejected
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-batches")
+          test "$code" = "401"
+      - name: Verify Gutenberg claim/complete/finalize cycle (simulating the Fila de Blocos JS)
+        run: |
+          POST_ID=$(docker compose run --rm wp-cli wp post create --post_type=page \
+            --post_title="CI Gutenberg Finalize" --post_status=publish --post_content="<!-- wp:paragraph --><p>original</p><!-- /wp:paragraph -->" \
+            --porcelain --path=/var/www/html)
+          BATCH_ID=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-batch" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"label":"CI finalize"}' \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['batch_id'])")
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-item" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d "{\"batch_id\":$BATCH_ID,\"target_id\":$POST_ID,\"target_type\":\"page\",\"operation\":\"update\",\"block_spec\":[{\"name\":\"core/paragraph\",\"attributes\":{\"content\":\"updated\"}}]}"
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-enable-finalization" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"batch_id\":$BATCH_ID}"
+          # Simulate the browser-side finalizer using an admin cookie instead of the Bearer token,
+          # matching how the internal routes are actually gated.
+          docker compose run --rm wp-cli wp user application-password create admin ci --porcelain --path=/var/www/html > /tmp/apppass.txt
+          APPPASS=$(cat /tmp/apppass.txt)
+          AUTH=$(python3 -c "import base64; print(base64.b64encode(b'admin:$APPPASS').decode())")
+          LEASE_OWNER=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-claim-batch?id=$BATCH_ID" \
+            -H "Authorization: Basic $AUTH" | python3 -c "import sys,json; print(json.load(sys.stdin)['lease_owner'])")
+          ITEM_ID=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-claim-item" \
+            -H "Authorization: Basic $AUTH" -H "Content-Type: application/json" \
+            -d "{\"batch_id\":$BATCH_ID,\"lease_owner\":\"$LEASE_OWNER\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['item']['item_id'])")
+          DONE=$(curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/gutenberg-complete-item" \
+            -H "Authorization: Basic $AUTH" -H "Content-Type: application/json" \
+            -d "{\"item_id\":$ITEM_ID,\"lease_owner\":\"$LEASE_OWNER\",\"content\":\"<!-- wp:paragraph --><p>updated</p><!-- /wp:paragraph -->\",\"validations\":[{\"isValid\":true}]}" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['batch']['status'])")
+          test "$DONE" = "finalized"
+          content=$(docker compose run --rm wp-cli wp post get "$POST_ID" --field=post_content --path=/var/www/html)
+          echo "$content" | grep -q "updated"
+      - name: Verify skill create/list/get/conflict/delete round-trips
+        run: |
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/skill" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"title":"CI Test Skill","description":"a test skill","content":"# Instructions\nDo the thing."}'
+          count=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/skills" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          test "$count" -gt "0"
+          content=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/skill?slug=ci-test-skill" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['content'])")
+          echo "$content" | grep -q "Do the thing"
+          conflict_status=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/skill" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"title":"CI Test Skill","description":"dup","content":"dup"}')
+          test "$conflict_status" = "409"
+          curl -sS -X DELETE "http://localhost:8080/wp-json/ikoeh-connect/v1/skill?slug=ci-test-skill" \
+            -H "Authorization: Bearer $TOKEN"
+      - name: Verify skills unauthenticated request is rejected
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:8080/wp-json/ikoeh-connect/v1/skills")
+          test "$code" = "401"
+      - name: Verify design save/check/activate/library/delete round-trips
+        run: |
+          DESIGN_MD=$'---\nname: CI Test Brand\ndescription: a test brand\ncolors:\n  primary: "#112233"\ntypography:\n  body:\n    fontFamily: Inter\n---\n\nSome guidance text.'
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/design" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            --data-raw "$(python3 -c "import json,sys; print(json.dumps({'content': sys.argv[1]}))" "$DESIGN_MD")"
+          ready=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/design-check?slug=ci-test-brand" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['ready'])")
+          test "$ready" = "True"
+          curl -sS -X POST "http://localhost:8080/wp-json/ikoeh-connect/v1/design-activate" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"slug":"ci-test-brand"}'
+          active_slug=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/design-active" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['slug'])")
+          test "$active_slug" = "ci-test-brand"
+          count=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/design-library" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          test "$count" -gt "0"
+          curl -sS -X DELETE "http://localhost:8080/wp-json/ikoeh-connect/v1/design?slug=ci-test-brand" \
+            -H "Authorization: Bearer $TOKEN"
+          active_after=$(curl -sS "http://localhost:8080/wp-json/ikoeh-connect/v1/design-active" \
+            -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin)['active'])")
+          test "$active_after" = "None"
+      - name: Verify design unauthenticated request is rejected
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:8080/wp-json/ikoeh-connect/v1/design-library")
+          test "$code" = "401"
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
