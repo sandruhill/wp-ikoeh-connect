@@ -54,6 +54,7 @@ class Ikoeh_Connect_Admin {
 
     public static function register_ajax() {
         add_action('wp_ajax_ikoeh_connect_test_api', [__CLASS__, 'ajax_test_api']);
+        add_action('wp_ajax_ikoeh_chat_save_setting', [__CLASS__, 'ajax_save_chat_setting']);
     }
 
     public static function ajax_test_api() {
@@ -76,6 +77,37 @@ class Ikoeh_Connect_Admin {
         }
 
         wp_send_json_error(['message' => "Resposta inesperada da API: HTTP {$code}"]);
+    }
+
+    public static function ajax_save_chat_setting() {
+        check_ajax_referer('ikoeh_chat_send', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Sem permissão.']);
+        }
+
+        $field = isset($_POST['field']) ? sanitize_key($_POST['field']) : '';
+        $value = isset($_POST['value']) ? trim(wp_unslash($_POST['value'])) : '';
+
+        switch ($field) {
+            case 'model':
+                update_option(Ikoeh_Connect_Chat::OPTION_MODEL, sanitize_text_field($value));
+                break;
+            case 'api_key':
+                if ('' !== $value) {
+                    update_option(Ikoeh_Connect_Chat::OPTION_API_KEY, $value);
+                }
+                break;
+            case 'screenshot_api_key':
+                if ('' !== $value) {
+                    update_option(Ikoeh_Connect_Site_Inspector::OPTION_SCREENSHOT_API_KEY, $value);
+                }
+                break;
+            default:
+                wp_send_json_error(['message' => 'Campo inválido.']);
+        }
+
+        wp_send_json_success(['saved' => $field]);
     }
 
     public static function render_page() {
@@ -111,25 +143,6 @@ class Ikoeh_Connect_Admin {
         ) {
             Ikoeh_Connect_Auth::revoke_connection(sanitize_text_field(wp_unslash($_POST['ikoeh_connect_revoke'])));
             $notice = ['type' => 'success', 'text' => 'Conexão revogada.'];
-        }
-
-        if (
-            isset($_POST['ikoeh_chat_save_settings']) &&
-            check_admin_referer('ikoeh_chat_settings_action', 'ikoeh_chat_settings_nonce')
-        ) {
-            $model = sanitize_text_field(wp_unslash($_POST['ikoeh_chat_model'] ?? Ikoeh_Connect_Chat::DEFAULT_MODEL));
-            update_option(Ikoeh_Connect_Chat::OPTION_MODEL, $model);
-
-            $new_key = isset($_POST['ikoeh_chat_api_key']) ? trim(wp_unslash($_POST['ikoeh_chat_api_key'])) : '';
-            if ('' !== $new_key) {
-                update_option(Ikoeh_Connect_Chat::OPTION_API_KEY, $new_key);
-            }
-
-            $new_screenshot_key = isset($_POST['ikoeh_chat_screenshot_api_key']) ? trim(wp_unslash($_POST['ikoeh_chat_screenshot_api_key'])) : '';
-            if ('' !== $new_screenshot_key) {
-                update_option(Ikoeh_Connect_Site_Inspector::OPTION_SCREENSHOT_API_KEY, $new_screenshot_key);
-            }
-            $notice = ['type' => 'success', 'text' => 'Configurações do chat salvas.'];
         }
 
         $connections = Ikoeh_Connect_Auth::get_connections();
@@ -277,38 +290,78 @@ class Ikoeh_Connect_Admin {
                 $chat_model = get_option(Ikoeh_Connect_Chat::OPTION_MODEL, '') ?: Ikoeh_Connect_Chat::DEFAULT_MODEL;
                 ?>
                 <h2>Configurações do Chat</h2>
-                <form method="post">
-                    <?php wp_nonce_field('ikoeh_chat_settings_action', 'ikoeh_chat_settings_nonce'); ?>
-                    <table class="form-table" role="presentation">
-                        <tr>
-                            <th scope="row">Chave de API (Anthropic)</th>
-                            <td>
-                                <p><?php echo esc_html($chat_key_status); ?></p>
-                                <input type="password" name="ikoeh_chat_api_key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row"><label for="ikoeh-chat-screenshot-key">Chave de API do Google (opcional)</label></th>
-                            <td>
-                                <input type="password" name="ikoeh_chat_screenshot_api_key" id="ikoeh-chat-screenshot-key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
-                                <p class="description">Nao obrigatoria -- a clonagem de site funciona sem isso. Configure uma chave gratuita do Google Cloud (API PageSpeed Insights habilitada) so se precisar de um limite maior de requisicoes.</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row"><label for="ikoeh-chat-model">Modelo</label></th>
-                            <td>
-                                <select name="ikoeh_chat_model" id="ikoeh-chat-model">
-                                    <?php foreach (['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] as $model_option) : ?>
-                                        <option value="<?php echo esc_attr($model_option); ?>" <?php selected($chat_model, $model_option); ?>><?php echo esc_html($model_option); ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </td>
-                        </tr>
-                    </table>
-                    <p class="submit">
-                        <button type="submit" name="ikoeh_chat_save_settings" class="button button-primary">Salvar configurações do chat</button>
-                    </p>
-                </form>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">Chave de API (Anthropic)</th>
+                        <td>
+                            <p><?php echo esc_html($chat_key_status); ?></p>
+                            <input type="password" id="ikoeh-chat-api-key" data-field="api_key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="ikoeh-chat-screenshot-key">Chave de API do Google (opcional)</label></th>
+                        <td>
+                            <input type="password" id="ikoeh-chat-screenshot-key" data-field="screenshot_api_key" placeholder="Deixe em branco para manter a atual" style="width:400px;" autocomplete="off">
+                            <p class="description">Nao obrigatoria -- a clonagem de site funciona sem isso. Configure uma chave gratuita do Google Cloud (API PageSpeed Insights habilitada) so se precisar de um limite maior de requisicoes.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="ikoeh-chat-model">Modelo</label></th>
+                        <td>
+                            <select id="ikoeh-chat-model" data-field="model">
+                                <?php foreach (['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] as $model_option) : ?>
+                                    <option value="<?php echo esc_attr($model_option); ?>" <?php selected($chat_model, $model_option); ?>><?php echo esc_html($model_option); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </td>
+                    </tr>
+                </table>
+                <p id="ikoeh-chat-autosave-status"></p>
+                <script>
+                (function () {
+                    var nonce = '<?php echo esc_js(wp_create_nonce('ikoeh_chat_send')); ?>';
+                    var statusEl = document.getElementById('ikoeh-chat-autosave-status');
+                    var fields = document.querySelectorAll('[data-field]');
+
+                    function saveField(el) {
+                        var value = el.value;
+                        if (el.type === 'password' && '' === value) {
+                            return;
+                        }
+
+                        var data = new URLSearchParams();
+                        data.append('action', 'ikoeh_chat_save_setting');
+                        data.append('nonce', nonce);
+                        data.append('field', el.getAttribute('data-field'));
+                        data.append('value', value);
+
+                        fetch(ajaxurl, { method: 'POST', body: data })
+                            .then(function (response) { return response.json(); })
+                            .then(function (json) {
+                                if (json.success) {
+                                    if (el.type === 'password') {
+                                        el.value = '';
+                                    }
+                                    statusEl.style.color = '#00a32a';
+                                    statusEl.textContent = 'Salvo';
+                                    setTimeout(function () { statusEl.textContent = ''; }, 2000);
+                                } else {
+                                    statusEl.style.color = '#d63638';
+                                    statusEl.textContent = 'Erro: ' + (json.data && json.data.message ? json.data.message : 'falha desconhecida');
+                                }
+                            })
+                            .catch(function () {
+                                statusEl.style.color = '#d63638';
+                                statusEl.textContent = 'Erro ao salvar.';
+                            });
+                    }
+
+                    fields.forEach(function (el) {
+                        var eventName = el.tagName === 'SELECT' ? 'change' : 'blur';
+                        el.addEventListener(eventName, function () { saveField(el); });
+                    });
+                })();
+                </script>
 
                 <h2>Conversa</h2>
                 <?php Ikoeh_Connect_Chat_Admin::render_chat_ui(); ?>
