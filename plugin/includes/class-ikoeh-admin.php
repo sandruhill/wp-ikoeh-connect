@@ -181,10 +181,18 @@ class Ikoeh_Connect_Admin {
                 </div>
             <?php endif; ?>
 
-            <?php if ($new_token) : ?>
+            <?php if ($new_token) :
+                $site_url = untrailingslashit(home_url());
+                $conf_block = "url={$site_url}\ntoken={$new_token}";
+            ?>
                 <div class="notice notice-success">
-                    <p><strong>Nova conexão criada.</strong> Copie o token agora, ele não será mostrado novamente:</p>
-                    <p><code id="ikoeh-connect-token"><?php echo esc_html($new_token); ?></code></p>
+                    <p><strong>Nova conexão criada.</strong> Copie o endereço e o token agora, o token não será mostrado novamente. Sem o endereço junto, o token sozinho não conecta a lugar nenhum. Guarde os dois juntos.</p>
+                    <p>
+                        <textarea id="ikoeh-connect-conf-block" readonly rows="2" style="width:100%;max-width:640px;font-family:monospace;font-size:13px;" onclick="this.select();"><?php echo esc_textarea($conf_block); ?></textarea>
+                    </p>
+                    <p>
+                        <button type="button" class="button button-secondary" onclick="var t=document.getElementById('ikoeh-connect-conf-block'); t.select(); t.setSelectionRange(0, 99999); navigator.clipboard.writeText(t.value); this.textContent='Copiado!'; var b=this; setTimeout(function(){ b.textContent='Copiar endereço + token'; }, 2000);">Copiar endereço + token</button>
+                    </p>
                 </div>
             <?php endif; ?>
 
